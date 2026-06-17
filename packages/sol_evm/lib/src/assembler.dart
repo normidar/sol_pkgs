@@ -27,6 +27,12 @@ class JumpInstruction extends Instruction {
   final bool conditional;
 }
 
+/// Pushes the byte-offset of [name] as a PUSH2 value (for return addresses).
+class PushLabelInstruction extends Instruction {
+  const PushLabelInstruction(this.name);
+  final String name;
+}
+
 /// Linear assembler that resolves labels in two passes and produces bytecode.
 class Assembler {
   final List<Instruction> _instructions = [];
@@ -49,6 +55,10 @@ class Assembler {
 
   void jumpi(String target) =>
       _instructions.add(JumpInstruction(target, conditional: true));
+
+  /// Pushes the byte offset of [name] onto the stack (for use as a return address).
+  void pushLabel(String name) =>
+      _instructions.add(PushLabelInstruction(name));
 
   // Convenience wrappers for common sequences
   void add() => emit(Opcode.ADD);
@@ -85,6 +95,8 @@ class Assembler {
           offset += 1 + data.length; // PUSHn + n bytes
         case JumpInstruction():
           offset += 3; // PUSH2 target + JUMP/JUMPI
+        case PushLabelInstruction():
+          offset += 3; // PUSH2 label-offset
       }
     }
 
@@ -107,6 +119,11 @@ class Assembler {
           out.addByte((target >> 8) & 0xFF);
           out.addByte(target & 0xFF);
           out.addByte(conditional ? Opcode.JUMPI.byte : Opcode.JUMP.byte);
+        case PushLabelInstruction(:final name):
+          final target = labelOffsets[name] ?? 0;
+          out.addByte(Opcode.PUSH2.byte);
+          out.addByte((target >> 8) & 0xFF);
+          out.addByte(target & 0xFF);
       }
     }
     return out.toBytes();
