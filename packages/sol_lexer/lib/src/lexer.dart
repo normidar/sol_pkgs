@@ -2,14 +2,11 @@ import 'package:sol_support/sol_support.dart';
 import 'token.dart';
 import 'token_kind.dart';
 
-/// Tokenises Solidity source text.
+/// Tokenises Solidity 0.8.x source text.
 ///
 /// Usage:
 /// ```dart
-/// final lexer = Lexer(source: src, sourceIndex: 0);
-/// for (final tok in lexer.tokenize()) {
-///   print(tok);
-/// }
+/// final tokens = Lexer(source: src, sourceIndex: 0).tokenize();
 /// ```
 class Lexer {
   Lexer({required this.source, required this.sourceIndex});
@@ -19,126 +16,144 @@ class Lexer {
 
   int _pos = 0;
 
-  // ── public API ────────────────────────────────────────────────────────────
+  // ── Public API ────────────────────────────────────────────────────────────
 
-  /// Returns all tokens (including EOF), skipping whitespace/comments.
+  /// Returns all tokens (excluding whitespace/plain comments) up to and
+  /// including [TokenKind.Eof].  NatSpec tokens are kept.
   List<Token> tokenize({bool includeTrivia = false}) {
     final tokens = <Token>[];
     while (true) {
       final tok = nextToken();
-      if (!includeTrivia &&
+      final skip = !includeTrivia &&
           (tok.kind == TokenKind.Whitespace ||
-              tok.kind == TokenKind.Comment)) {
-        if (tok.isEof) {
-          tokens.add(tok);
-          break;
-        }
-        continue;
-      }
-      tokens.add(tok);
-      if (tok.isEof) break;
+              tok.kind == TokenKind.Comment);
+      if (!skip) tokens.add(tok);
+      if (tok.kind == TokenKind.Eof) break;
     }
     return tokens;
   }
 
-  /// Scan and return one token (including whitespace/comment trivia).
+  /// Scans and returns one raw token (including trivia).
   Token nextToken() {
-    if (_pos >= source.length) return _tok(TokenKind.Eof, _pos, 0);
+    if (_pos >= source.length) {
+      return _tok(TokenKind.Eof, _pos, 0);
+    }
 
     final start = _pos;
-    final ch = source.codeUnitAt(_pos);
+    final ch = _cu(_pos);
 
     // ── Whitespace ────────────────────────────────────────────────────────
-    if (_isWhitespace(ch)) {
-      while (_pos < source.length && _isWhitespace(source.codeUnitAt(_pos))) {
-        _pos++;
-      }
+    if (_isWs(ch)) {
+      while (_pos < source.length && _isWs(_cu(_pos))) _pos++;
       return _tok(TokenKind.Whitespace, start, _pos - start);
     }
 
-    // ── Line comment ──────────────────────────────────────────────────────
-    if (ch == 0x2F && _peek(1) == 0x2F) {
-      _pos += 2;
-      while (_pos < source.length && source.codeUnitAt(_pos) != 0x0A) _pos++;
-      return _tok(TokenKind.Comment, start, _pos - start);
-    }
-
-    // ── Block comment ─────────────────────────────────────────────────────
-    if (ch == 0x2F && _peek(1) == 0x2A) {
-      _pos += 2;
-      while (_pos < source.length - 1) {
-        if (source.codeUnitAt(_pos) == 0x2A &&
-            source.codeUnitAt(_pos + 1) == 0x2F) {
-          _pos += 2;
-          break;
-        }
-        _pos++;
+    // ── Comments ──────────────────────────────────────────────────────────
+    if (ch == 0x2F) {
+      final next = _peek(1);
+      // NatSpec line  ///
+      if (next == 0x2F && _peek(2) == 0x2F) {
+        _pos += 3;
+        while (_pos < source.length && _cu(_pos) != 0x0A) _pos++;
+        return _tokLex(TokenKind.NatSpecLine, start);
       }
-      return _tok(TokenKind.Comment, start, _pos - start);
+      // Line comment //
+      if (next == 0x2F) {
+        _pos += 2;
+        while (_pos < source.length && _cu(_pos) != 0x0A) _pos++;
+        return _tok(TokenKind.Comment, start, _pos - start);
+      }
+      // NatSpec block  /**
+      if (next == 0x2A && _peek(2) == 0x2A && _peek(3) != 0x2F) {
+        _pos += 3;
+        while (_pos < source.length - 1) {
+          if (_cu(_pos) == 0x2A && _cu(_pos + 1) == 0x2F) {
+            _pos += 2;
+            break;
+          }
+          _pos++;
+        }
+        return _tokLex(TokenKind.NatSpecBlock, start);
+      }
+      // Block comment /*
+      if (next == 0x2A) {
+        _pos += 2;
+        while (_pos < source.length - 1) {
+          if (_cu(_pos) == 0x2A && _cu(_pos + 1) == 0x2F) {
+            _pos += 2;
+            break;
+          }
+          _pos++;
+        }
+        return _tok(TokenKind.Comment, start, _pos - start);
+      }
     }
 
-    // ── String literals ───────────────────────────────────────────────────
+    // ── String prefixes: unicode"…" hex"…" ───────────────────────────────
+    if (_isIdentStart(ch)) {
+      // Peek ahead for string prefixes before falling through to identifier.
+      if (_matchPrefix('unicode')) {
+        final q = _cu(_pos);
+        if (q == 0x22 || q == 0x27) {
+          return _scanString(start, q, kind: TokenKind.UnicodeStringLiteral);
+        }
+        // Not a string: rewind and lex as identifier.
+        _pos = start;
+      } else if (_matchPrefix('hex')) {
+        final q = _cu(_pos);
+        if (q == 0x22 || q == 0x27) {
+          return _scanString(start, q, kind: TokenKind.HexStringLiteral);
+        }
+        _pos = start;
+      }
+    }
+
+    // ── Plain string literals ─────────────────────────────────────────────
     if (ch == 0x22 /* " */ || ch == 0x27 /* ' */) {
       return _scanString(start, ch);
     }
-    if (_matchKeyword('unicode"') || _matchKeyword("unicode'")) {
-      return _scanString(start, source.codeUnitAt(_pos - 1),
-          kind: TokenKind.UnicodeStringLiteral);
-    }
-    if (_matchKeyword('hex"') || _matchKeyword("hex'")) {
-      return _scanString(start, source.codeUnitAt(_pos - 1),
-          kind: TokenKind.HexStringLiteral);
-    }
 
-    // ── Hex number ────────────────────────────────────────────────────────
-    if (ch == 0x30 && _peek(1) == 0x78 /* 0x */) {
+    // ── Hex number  0x… ───────────────────────────────────────────────────
+    if (ch == 0x30 && _peek(1) == 0x78) {
       _pos += 2;
-      while (_pos < source.length && _isHexDigit(source.codeUnitAt(_pos))) {
+      while (_pos < source.length && _isHexDigit(_cu(_pos))) _pos++;
+      // optional underscores (0x1_000)
+      while (_pos < source.length && _cu(_pos) == 0x5F) {
         _pos++;
+        while (_pos < source.length && _isHexDigit(_cu(_pos))) _pos++;
       }
       return _tokLex(TokenKind.NumberLiteral, start);
     }
 
-    // ── Decimal number ────────────────────────────────────────────────────
+    // ── Decimal numbers ────────────────────────────────────────────────────
     if (_isDigit(ch)) {
-      while (_pos < source.length && _isDigit(source.codeUnitAt(_pos))) _pos++;
-      if (_pos < source.length && source.codeUnitAt(_pos) == 0x2E /* . */) {
+      _scanDecimalDigits();
+      if (_pos < source.length && _cu(_pos) == 0x2E /* . */ &&
+          _pos + 1 < source.length && _isDigit(_cu(_pos + 1))) {
         _pos++;
-        while (_pos < source.length && _isDigit(source.codeUnitAt(_pos))) {
-          _pos++;
-        }
+        _scanDecimalDigits();
       }
       if (_pos < source.length &&
-          (source.codeUnitAt(_pos) == 0x65 /* e */ ||
-              source.codeUnitAt(_pos) == 0x45 /* E */)) {
+          (_cu(_pos) == 0x65 /* e */ || _cu(_pos) == 0x45 /* E */)) {
         _pos++;
         if (_pos < source.length &&
-            (source.codeUnitAt(_pos) == 0x2B /* + */ ||
-                source.codeUnitAt(_pos) == 0x2D /* - */)) {
+            (_cu(_pos) == 0x2B /* + */ || _cu(_pos) == 0x2D /* - */)) {
           _pos++;
         }
-        while (_pos < source.length && _isDigit(source.codeUnitAt(_pos))) {
-          _pos++;
-        }
+        _scanDecimalDigits();
       }
       return _tokLex(TokenKind.NumberLiteral, start);
     }
 
     // ── Identifiers & keywords ────────────────────────────────────────────
     if (_isIdentStart(ch)) {
-      while (_pos < source.length && _isIdentCont(source.codeUnitAt(_pos))) {
-        _pos++;
-      }
+      while (_pos < source.length && _isIdentCont(_cu(_pos))) _pos++;
       final text = source.substring(start, _pos);
       final kind = keywordOrIdentifier(text);
       int width = 0;
-      if (kind == TokenKind.UintN) {
-        width = int.parse(text.substring(4));
-      } else if (kind == TokenKind.IntN) {
-        width = int.parse(text.substring(3));
-      } else if (kind == TokenKind.BytesN) {
-        width = int.parse(text.substring(5));
-      }
+      if (kind == TokenKind.UintN) width = int.parse(text.substring(4));
+      if (kind == TokenKind.IntN) width = int.parse(text.substring(3));
+      if (kind == TokenKind.BytesN) width = int.parse(text.substring(5));
       return Token(
         kind: kind,
         location: _loc(start, _pos - start),
@@ -147,7 +162,7 @@ class Lexer {
       );
     }
 
-    // ── Punctuation & operators ───────────────────────────────────────────
+    // ── Punctuation & operators ────────────────────────────────────────────
     _pos++;
     switch (ch) {
       case 0x28: return _tok(TokenKind.LParen, start, 1);
@@ -177,7 +192,7 @@ class Lexer {
         if (_consume(0x3D)) return _tok(TokenKind.StarEq, start, 2);
         return _tok(TokenKind.Star, start, 1);
 
-      case 0x2F: // /
+      case 0x2F: // / (not comment — comments handled above)
         if (_consume(0x3D)) return _tok(TokenKind.SlashEq, start, 2);
         return _tok(TokenKind.Slash, start, 1);
 
@@ -229,7 +244,8 @@ class Lexer {
         return _tok(TokenKind.Gt, start, 1);
 
       case 0x2E: // .
-        if (_consume(0x2E) && _consume(0x2E)) {
+        if (_peek(0) == 0x2E && _peek(1) == 0x2E) {
+          _pos += 2;
           return _tok(TokenKind.DotDotDot, start, 3);
         }
         return _tok(TokenKind.Dot, start, 1);
@@ -243,14 +259,15 @@ class Lexer {
     }
   }
 
-  // ── helpers ───────────────────────────────────────────────────────────────
+  // ── Internal helpers ──────────────────────────────────────────────────────
 
   Token _scanString(int start, int quote,
       {TokenKind kind = TokenKind.StringLiteral}) {
+    _pos++; // consume opening quote
     while (_pos < source.length) {
-      final c = source.codeUnitAt(_pos++);
+      final c = _cu(_pos++);
       if (c == 0x5C /* \ */) {
-        _pos++; // skip escape
+        if (_pos < source.length) _pos++; // skip escape
       } else if (c == quote) {
         break;
       }
@@ -258,30 +275,41 @@ class Lexer {
     return _tokLex(kind, start);
   }
 
-  bool _matchKeyword(String kw) {
-    if (_pos + kw.length > source.length) return false;
-    if (source.startsWith(kw, _pos)) {
-      _pos += kw.length;
-      return true;
+  void _scanDecimalDigits() {
+    while (_pos < source.length && (_isDigit(_cu(_pos)) || _cu(_pos) == 0x5F)) {
+      _pos++;
     }
-    return false;
+  }
+
+  /// Tries to match [prefix] at [_pos]. On success advances [_pos] past it.
+  bool _matchPrefix(String prefix) {
+    if (_pos + prefix.length > source.length) return false;
+    for (var i = 0; i < prefix.length; i++) {
+      if (source.codeUnitAt(_pos + i) != prefix.codeUnitAt(i)) return false;
+    }
+    _pos += prefix.length;
+    return true;
   }
 
   bool _consume(int code) {
-    if (_pos < source.length && source.codeUnitAt(_pos) == code) {
+    if (_pos < source.length && _cu(_pos) == code) {
       _pos++;
       return true;
     }
     return false;
   }
 
+  int _cu(int pos) => source.codeUnitAt(pos);
   int _peek(int offset) {
     final i = _pos + offset;
-    return i < source.length ? source.codeUnitAt(i) : -1;
+    return i < source.length ? _cu(i) : -1;
   }
 
-  Token _tok(TokenKind kind, int start, int length) =>
-      Token(kind: kind, location: _loc(start, length));
+  Token _tok(TokenKind kind, int start, int length) => Token(
+        kind: kind,
+        location: _loc(start, length),
+        lexeme: source.substring(start, start + length),
+      );
 
   Token _tokLex(TokenKind kind, int start) => Token(
         kind: kind,
@@ -292,7 +320,7 @@ class Lexer {
   SourceLocation _loc(int start, int length) =>
       SourceLocation(sourceIndex: sourceIndex, offset: start, length: length);
 
-  static bool _isWhitespace(int c) =>
+  static bool _isWs(int c) =>
       c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D;
 
   static bool _isDigit(int c) => c >= 0x30 && c <= 0x39;

@@ -1,5 +1,5 @@
-import 'package:sol_support/sol_support.dart';
 import 'ast_node.dart';
+import 'enums.dart';
 import 'type_names.dart';
 import 'visitor.dart';
 
@@ -16,9 +16,7 @@ class Literal extends Expression {
   void accept(AstVisitor visitor) => visitor.visitLiteral(this);
 }
 
-enum LiteralKind { number, string, unicodeString, hexString, bool$ }
-
-// ── Name expressions ──────────────────────────────────────────────────────────
+// ── Identifier & member access ────────────────────────────────────────────────
 
 class Identifier extends Expression {
   Identifier(super.location, this.name);
@@ -60,25 +58,32 @@ class IndexRangeAccess extends Expression {
   void accept(AstVisitor visitor) => visitor.visitIndexRangeAccess(this);
 }
 
-// ── Calls ─────────────────────────────────────────────────────────────────────
+// ── Calls & new ───────────────────────────────────────────────────────────────
 
 class FunctionCall extends Expression {
   FunctionCall(
-      super.location, this.expression, this.arguments, this.argumentNames);
+    super.location,
+    this.expression,
+    this.arguments,
+    this.argumentNames,
+  );
 
   final Expression expression;
   final List<Expression> arguments;
-  final List<String?> argumentNames; // non-null for named args
+
+  /// Parallel to [arguments]; non-null entry = named argument.
+  final List<String?> argumentNames;
 
   @override
   void accept(AstVisitor visitor) => visitor.visitFunctionCall(this);
 }
 
+/// `f{value: v, gas: g}(args)` — call options.
 class FunctionCallOptions extends Expression {
   FunctionCallOptions(super.location, this.expression, this.options);
 
   final Expression expression;
-  final Map<String, Expression> options; // {value: ..., gas: ...}
+  final Map<String, Expression> options;
 
   @override
   void accept(AstVisitor visitor) => visitor.visitFunctionCallOptions(this);
@@ -96,7 +101,12 @@ class NewExpression extends Expression {
 // ── Operators ─────────────────────────────────────────────────────────────────
 
 class UnaryOperation extends Expression {
-  UnaryOperation(super.location, this.operator$, this.subExpression, this.prefix);
+  UnaryOperation(
+    super.location,
+    this.operator$,
+    this.subExpression,
+    this.prefix,
+  );
 
   final String operator$;
   final Expression subExpression;
@@ -118,8 +128,12 @@ class BinaryOperation extends Expression {
 }
 
 class Assignment extends Expression {
-  Assignment(super.location, this.operator$, this.leftHandSide,
-      this.rightHandSide);
+  Assignment(
+    super.location,
+    this.operator$,
+    this.leftHandSide,
+    this.rightHandSide,
+  );
 
   final String operator$;
   final Expression leftHandSide;
@@ -130,8 +144,12 @@ class Assignment extends Expression {
 }
 
 class Conditional extends Expression {
-  Conditional(super.location, this.condition, this.trueExpression,
-      this.falseExpression);
+  Conditional(
+    super.location,
+    this.condition,
+    this.trueExpression,
+    this.falseExpression,
+  );
 
   final Expression condition;
   final Expression trueExpression;
@@ -161,4 +179,24 @@ class TupleExpression extends Expression {
 
   @override
   void accept(AstVisitor visitor) => visitor.visitTupleExpression(this);
+}
+
+/// `delete x`
+class DeleteExpression extends Expression {
+  DeleteExpression(super.location, this.expression);
+
+  final Expression expression;
+
+  @override
+  void accept(AstVisitor visitor) => visitor.visitDeleteExpression(this);
+}
+
+/// `type(T)`, `type(T).min`, `type(T).max` — resolved as MemberAccess later.
+class TypeExpression extends Expression {
+  TypeExpression(super.location, this.typeName);
+
+  final TypeName typeName;
+
+  @override
+  void accept(AstVisitor visitor) => visitor.visitTypeExpression(this);
 }

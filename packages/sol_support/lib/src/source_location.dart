@@ -46,6 +46,13 @@ class LineColumn {
   final int column;
 
   @override
+  bool operator ==(Object other) =>
+      other is LineColumn && other.line == line && other.column == column;
+
+  @override
+  int get hashCode => Object.hash(line, column);
+
+  @override
   String toString() => '$line:$column';
 }
 

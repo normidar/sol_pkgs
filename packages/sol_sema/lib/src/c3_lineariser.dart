@@ -7,16 +7,25 @@ List<String> c3Linearise(
   String name,
   List<String> Function(String) basesOf,
 ) {
-  return _merge(name, basesOf);
+  return _merge(name, basesOf, {});
 }
 
-List<String> _merge(String name, List<String> Function(String) basesOf) {
+List<String> _merge(
+  String name,
+  List<String> Function(String) basesOf,
+  Set<String> visiting,
+) {
+  if (visiting.contains(name)) {
+    throw C3LinearisationError('Cycle detected in inheritance hierarchy at $name');
+  }
+  visiting = {...visiting, name};
+
   final bases = basesOf(name);
   if (bases.isEmpty) return [name];
 
   // Build linearisations of each base + their lists.
   final lists = [
-    for (final b in bases) _merge(b, basesOf),
+    for (final b in bases) _merge(b, basesOf, visiting),
     [...bases],
   ];
 

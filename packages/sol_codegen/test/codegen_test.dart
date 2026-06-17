@@ -14,6 +14,7 @@ ContractDefinition makeAdder() => ContractDefinition(
       [
         FunctionDefinition(
           location: loc,
+          kind: FunctionKind.function,
           name: 'getSum',
           parameters: [
             Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), 'a', null),

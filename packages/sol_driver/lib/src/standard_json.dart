@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:sol_support/sol_support.dart';
 import 'compilation_result.dart';
 import 'compiler_stack.dart';
 

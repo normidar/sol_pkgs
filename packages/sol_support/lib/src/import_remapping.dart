@@ -37,12 +37,23 @@ class ImportRemapper {
   final List<ImportRemapping> _remappings;
 
   /// Resolve [importPath] as seen from [fromPath], applying remappings.
+  ///
+  /// Context-specific remappings take priority over global ones when prefix
+  /// lengths are equal.
   String resolve(String importPath, String fromPath) {
     ImportRemapping? best;
     for (final r in _remappings) {
       if (r.context.isNotEmpty && !fromPath.startsWith(r.context)) continue;
       if (!importPath.startsWith(r.prefix)) continue;
-      if (best == null || r.prefix.length > best.prefix.length) best = r;
+      if (best == null) {
+        best = r;
+      } else if (r.prefix.length > best.prefix.length) {
+        best = r;
+      } else if (r.prefix.length == best.prefix.length &&
+          r.context.length > best.context.length) {
+        // Longer (more specific) context wins when prefix lengths are equal.
+        best = r;
+      }
     }
     if (best == null) return importPath;
     return best.target + importPath.substring(best.prefix.length);

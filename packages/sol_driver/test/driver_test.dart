@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:sol_driver/sol_driver.dart';
+import 'package:sol_support/sol_support.dart';
 import 'package:test/test.dart';
 
 const _adderSource = '''
@@ -44,7 +45,7 @@ void main() {
       });
       final output = StandardJson().compile(input);
       final decoded = jsonDecode(output) as Map<String, dynamic>;
-      expect(decoded, containsKey('contracts'));
+      expect(decoded.containsKey('contracts'), isTrue);
     });
   });
 }

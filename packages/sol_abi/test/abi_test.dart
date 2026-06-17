@@ -1,7 +1,7 @@
 import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_support/sol_support.dart';
-import 'package:sol_types/sol_types.dart';
+import 'package:sol_types/sol_types.dart' hide StateMutability;
 import 'package:test/test.dart';
 
 const loc = SourceLocation(sourceIndex: 0, offset: 0, length: 0);
@@ -17,6 +17,7 @@ void main() {
         [
           FunctionDefinition(
             location: loc,
+            kind: FunctionKind.function,
             name: 'getSum',
             parameters: [
               Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), 'a', null),

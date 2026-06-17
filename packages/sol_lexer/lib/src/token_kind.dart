@@ -8,10 +8,10 @@ enum TokenKind {
   TrueLiteral,
   FalseLiteral,
 
-  // ── Identifiers & keywords ────────────────────────────────────────────────
+  // ── Identifiers ────────────────────────────────────────────────────────────
   Identifier,
 
-  // Control flow
+  // ── Control flow ───────────────────────────────────────────────────────────
   kIf,
   kElse,
   kFor,
@@ -21,16 +21,17 @@ enum TokenKind {
   kContinue,
   kReturn,
   kRevert,
+  kTry,
+  kCatch,
 
-  // Contract structure
+  // ── Contract structure ─────────────────────────────────────────────────────
   kContract,
   kInterface,
   kLibrary,
   kAbstract,
   kIs,
-  kInheritance, // placeholder for future use
 
-  // Declarations
+  // ── Member kinds ───────────────────────────────────────────────────────────
   kFunction,
   kConstructor,
   kFallback,
@@ -41,20 +42,23 @@ enum TokenKind {
   kStruct,
   kEnum,
   kMapping,
+  kReturns,   // ← was missing
 
-  // Types – elementary
+  // ── Elementary types ───────────────────────────────────────────────────────
   kAddress,
   kBool,
   kString,
   kBytes,
   kInt,
   kUint,
-  // int8…int256 / uint8…uint256 are emitted as IntN / UintN variants
-  IntN,   // carries the bit width in Token.intWidth
-  UintN,  // carries the bit width in Token.intWidth
-  BytesN, // carries the byte count in Token.intWidth
+  /// `intN`  — [Token.intWidth] carries the bit width (8..256).
+  IntN,
+  /// `uintN` — [Token.intWidth] carries the bit width (8..256).
+  UintN,
+  /// `bytesN` — [Token.intWidth] carries the byte count (1..32).
+  BytesN,
 
-  // Storage / visibility
+  // ── Storage / visibility ────────────────────────────────────────────────────
   kPublic,
   kPrivate,
   kInternal,
@@ -71,13 +75,13 @@ enum TokenKind {
   kOverride,
   kVirtual,
 
-  // Special values
+  // ── Special values ─────────────────────────────────────────────────────────
   kNew,
   kDelete,
   kThis,
   kSuper,
 
-  // Ether / time units
+  // ── Ether / time units ─────────────────────────────────────────────────────
   kWei,
   kGwei,
   kEther,
@@ -87,7 +91,7 @@ enum TokenKind {
   kDays,
   kWeeks,
 
-  // Assembly
+  // ── Inline assembly / Yul ──────────────────────────────────────────────────
   kAssembly,
   kLet,
   kLeave,
@@ -95,23 +99,26 @@ enum TokenKind {
   kCase,
   kDefault,
 
-  // Imports
+  // ── Arithmetic safety ──────────────────────────────────────────────────────
+  kUnchecked,
+
+  // ── Import ─────────────────────────────────────────────────────────────────
   kImport,
   kFrom,
   kAs,
 
-  // Emit / type
+  // ── Misc declarations ──────────────────────────────────────────────────────
   kEmit,
   kType,
   kUsing,
-  kFor2, // 'for' in using…for
-
-  // Pragma
   kPragma,
   kSolidity,
 
+  // ── Event parameter modifier ───────────────────────────────────────────────
+  kIndexed,
+  kAnonymous,
+
   // ── Operators ─────────────────────────────────────────────────────────────
-  // Arithmetic
   Plus,         // +
   Minus,        // -
   Star,         // *
@@ -119,7 +126,6 @@ enum TokenKind {
   Percent,      // %
   StarStar,     // **
 
-  // Bitwise
   Ampersand,    // &
   Pipe,         // |
   Caret,        // ^
@@ -128,12 +134,10 @@ enum TokenKind {
   GtGt,         // >>
   GtGtGt,       // >>>
 
-  // Logical
   AmpAmp,       // &&
   PipePipe,     // ||
   Bang,         // !
 
-  // Comparison
   EqEq,         // ==
   BangEq,       // !=
   Lt,           // <
@@ -141,7 +145,6 @@ enum TokenKind {
   Gt,           // >
   GtEq,         // >=
 
-  // Assignment
   Eq,           // =
   PlusEq,       // +=
   MinusEq,      // -=
@@ -155,11 +158,9 @@ enum TokenKind {
   GtGtEq,       // >>=
   GtGtGtEq,     // >>>=
 
-  // Increment / decrement
   PlusPlus,     // ++
   MinusMinus,   // --
 
-  // Other
   Arrow,        // =>
   RightArrow,   // ->
   Question,     // ?
@@ -168,7 +169,7 @@ enum TokenKind {
   Dot,          // .
   DotDotDot,    // ...
 
-  // ── Delimiters ────────────────────────────────────────────────────────────
+  // ── Delimiters ─────────────────────────────────────────────────────────────
   LParen,       // (
   RParen,       // )
   LBracket,     // [
@@ -178,14 +179,15 @@ enum TokenKind {
   Semicolon,    // ;
   Comma,        // ,
 
-  // ── Special ───────────────────────────────────────────────────────────────
-  Comment,      // single/multi-line, usually skipped
-  Whitespace,   // usually skipped
+  // ── Trivia & special ───────────────────────────────────────────────────────
+  NatSpecLine,   // /// …
+  NatSpecBlock,  // /** … */
+  Comment,       // // … or /* … */
+  Whitespace,
   Eof,
-  Error,        // scan error
+  Error,
 }
 
-/// Fast keyword lookup.  Called by the lexer after scanning an identifier.
 const Map<String, TokenKind> _keywords = {
   'if': TokenKind.kIf,
   'else': TokenKind.kElse,
@@ -195,7 +197,10 @@ const Map<String, TokenKind> _keywords = {
   'break': TokenKind.kBreak,
   'continue': TokenKind.kContinue,
   'return': TokenKind.kReturn,
+  'returns': TokenKind.kReturns,
   'revert': TokenKind.kRevert,
+  'try': TokenKind.kTry,
+  'catch': TokenKind.kCatch,
   'contract': TokenKind.kContract,
   'interface': TokenKind.kInterface,
   'library': TokenKind.kLibrary,
@@ -252,6 +257,7 @@ const Map<String, TokenKind> _keywords = {
   'switch': TokenKind.kSwitch,
   'case': TokenKind.kCase,
   'default': TokenKind.kDefault,
+  'unchecked': TokenKind.kUnchecked,
   'import': TokenKind.kImport,
   'from': TokenKind.kFrom,
   'as': TokenKind.kAs,
@@ -260,26 +266,26 @@ const Map<String, TokenKind> _keywords = {
   'using': TokenKind.kUsing,
   'pragma': TokenKind.kPragma,
   'solidity': TokenKind.kSolidity,
+  'indexed': TokenKind.kIndexed,
+  'anonymous': TokenKind.kAnonymous,
 };
 
-/// Returns the keyword kind for [text], or [TokenKind.Identifier].
-/// Handles `intN`, `uintN`, `bytesN` variants.
+/// Returns the keyword [TokenKind] for [text], or [TokenKind.Identifier].
+///
+/// Handles the sized variants `intN`, `uintN`, `bytesN`.
 TokenKind keywordOrIdentifier(String text) {
   final kw = _keywords[text];
   if (kw != null) return kw;
 
-  // uint8…uint256
-  if (text.startsWith('uint')) {
+  if (text.startsWith('uint') && text.length > 4) {
     final n = int.tryParse(text.substring(4));
     if (n != null && n >= 8 && n <= 256 && n % 8 == 0) return TokenKind.UintN;
   }
-  // int8…int256
-  if (text.startsWith('int')) {
+  if (text.startsWith('int') && text.length > 3) {
     final n = int.tryParse(text.substring(3));
     if (n != null && n >= 8 && n <= 256 && n % 8 == 0) return TokenKind.IntN;
   }
-  // bytes1…bytes32
-  if (text.startsWith('bytes')) {
+  if (text.startsWith('bytes') && text.length > 5) {
     final n = int.tryParse(text.substring(5));
     if (n != null && n >= 1 && n <= 32) return TokenKind.BytesN;
   }

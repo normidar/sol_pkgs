@@ -24,6 +24,7 @@ void main() {
       final visited = <String>[];
       final fn = FunctionDefinition(
         location: loc,
+        kind: FunctionKind.function,
         name: 'getSum',
         parameters: [],
         returnParameters: [],

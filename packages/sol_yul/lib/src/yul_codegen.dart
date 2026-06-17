@@ -128,9 +128,8 @@ class YulCodeGenerator {
             _asm.push(n);
         }
 
-      case YulIdentifier(:final name):
+      case YulIdentifier():
         // Variable reference — push from stack slot; stub for now.
-        _ = name;
         _asm.emit(Opcode.PUSH0);
 
       case YulFunctionCall(:final name, :final arguments):

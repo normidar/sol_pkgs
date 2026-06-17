@@ -2,11 +2,11 @@ import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_lexer/sol_lexer.dart';
 import 'package:sol_support/sol_support.dart';
 
-/// Recursive-descent parser: token list → [SourceFile] AST.
+/// Recursive-descent Solidity 0.8.x parser.
 ///
-/// The parser is intentionally straightforward — one method per grammar rule,
-/// no backtracking.  Errors are reported to [diagnostics] and parsing
-/// continues where possible (error recovery via synchronisation).
+/// Converts a flat token list (from [Lexer]) into a [SourceFile] AST.
+/// All errors are reported via [diagnostics]; parsing continues where
+/// possible (panic-mode error recovery on synchronisation tokens).
 class Parser {
   Parser({
     required this.tokens,
@@ -20,38 +20,43 @@ class Parser {
 
   int _pos = 0;
 
-  Token get _current => _pos < tokens.length ? tokens[_pos] : _eof;
-  Token get _eof => Token(
+  Token get _cur => _pos < tokens.length ? tokens[_pos] : _eofToken;
+  Token get _eofToken => Token(
         kind: TokenKind.Eof,
-        location: SourceLocation(sourceIndex: sourceIndex, offset: 0, length: 0),
+        location: SourceLocation(
+            sourceIndex: sourceIndex, offset: 0, length: 0),
       );
 
-  // ── Public entry point ────────────────────────────────────────────────────
+  // ── Entry point ───────────────────────────────────────────────────────────
 
   SourceFile parse() {
-    final start = _current.location;
+    final start = _cur.location;
     final pragmas = <PragmaDirective>[];
     final imports = <ImportDirective>[];
     final contracts = <ContractDefinition>[];
 
     while (!_isEof) {
-      if (_check(TokenKind.kPragma)) {
-        pragmas.add(_parsePragma());
-      } else if (_check(TokenKind.kImport)) {
-        imports.add(_parseImport());
-      } else if (_checkAny([
-        TokenKind.kContract,
-        TokenKind.kInterface,
-        TokenKind.kLibrary,
-        TokenKind.kAbstract,
-      ])) {
-        contracts.add(_parseContractDefinition());
-      } else {
-        diagnostics.error(
-          'Unexpected token "${_current.lexeme}" at top level',
-          location: _current.location,
-        );
-        _advance();
+      try {
+        if (_at(TokenKind.kPragma)) {
+          pragmas.add(_parsePragma());
+        } else if (_at(TokenKind.kImport)) {
+          imports.add(_parseImport());
+        } else if (_atAny([
+          TokenKind.kContract,
+          TokenKind.kInterface,
+          TokenKind.kLibrary,
+          TokenKind.kAbstract,
+        ])) {
+          contracts.add(_parseContractDefinition());
+        } else {
+          _errorAndSync('Unexpected token "${_cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme}" at top level');
+        }
+      } on _ParseError {
+        _synchronize({
+          TokenKind.kContract, TokenKind.kInterface,
+          TokenKind.kLibrary, TokenKind.kAbstract,
+          TokenKind.kPragma, TokenKind.kImport,
+        });
       }
     }
 
@@ -63,10 +68,9 @@ class Parser {
   PragmaDirective _parsePragma() {
     final start = _expect(TokenKind.kPragma).location;
     final literals = <String>[];
-    while (!_check(TokenKind.Semicolon) && !_isEof) {
-      literals.add(_current.lexeme.isEmpty
-          ? _current.kind.name
-          : _current.lexeme);
+    while (!_at(TokenKind.Semicolon) && !_isEof) {
+      literals.add(
+          _cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme);
       _advance();
     }
     _expect(TokenKind.Semicolon);
@@ -79,23 +83,21 @@ class Parser {
     String? alias;
     final symbolAliases = <String, String?>{};
 
-    if (_check(TokenKind.StringLiteral)) {
+    if (_atAny([TokenKind.StringLiteral, TokenKind.UnicodeStringLiteral])) {
       path = _advance().lexeme;
-      if (_tryConsume(TokenKind.kAs)) {
-        alias = _expectIdentifier();
-      }
-    } else if (_check(TokenKind.Star)) {
+      if (_tryConsume(TokenKind.kAs)) alias = _ident();
+    } else if (_at(TokenKind.Star)) {
       _advance();
       _expect(TokenKind.kAs);
-      alias = _expectIdentifier();
+      alias = _ident();
       _expect(TokenKind.kFrom);
       path = _advance().lexeme;
-    } else if (_check(TokenKind.LBrace)) {
+    } else if (_at(TokenKind.LBrace)) {
       _advance();
-      while (!_check(TokenKind.RBrace) && !_isEof) {
-        final sym = _expectIdentifier();
+      while (!_at(TokenKind.RBrace) && !_isEof) {
+        final sym = _ident();
         String? symAlias;
-        if (_tryConsume(TokenKind.kAs)) symAlias = _expectIdentifier();
+        if (_tryConsume(TokenKind.kAs)) symAlias = _ident();
         symbolAliases[sym] = symAlias;
         if (!_tryConsume(TokenKind.Comma)) break;
       }
@@ -103,81 +105,110 @@ class Parser {
       _expect(TokenKind.kFrom);
       path = _advance().lexeme;
     } else {
-      diagnostics.error('Expected import path', location: _current.location);
+      _error('Expected import path');
       path = '';
     }
-
     _expect(TokenKind.Semicolon);
     return ImportDirective(_locFrom(start), path, alias, symbolAliases);
   }
 
-  // ── Contract ──────────────────────────────────────────────────────────────
+  // ── Contract / interface / library ────────────────────────────────────────
 
   ContractDefinition _parseContractDefinition() {
-    final start = _current.location;
-    _tryConsume(TokenKind.kAbstract);
+    final start = _cur.location;
+    final isAbstract = _tryConsume(TokenKind.kAbstract);
+
     final kindTok = _advance();
     final kind = switch (kindTok.kind) {
       TokenKind.kInterface => ContractKind.interface,
       TokenKind.kLibrary => ContractKind.library,
       _ => ContractKind.contract,
     };
-    final name = _expectIdentifier();
+
+    final name = _ident();
+
     final bases = <InheritanceSpecifier>[];
     if (_tryConsume(TokenKind.kIs)) {
       do {
-        final baseName = _expectIdentifier();
+        final bStart = _cur.location;
+        final bName = _qualifiedName();
         final args = <Expression>[];
         if (_tryConsume(TokenKind.LParen)) {
-          while (!_check(TokenKind.RParen) && !_isEof) {
+          if (!_at(TokenKind.RParen)) {
             args.add(_parseExpression());
-            if (!_tryConsume(TokenKind.Comma)) break;
+            while (_tryConsume(TokenKind.Comma)) args.add(_parseExpression());
           }
           _expect(TokenKind.RParen);
         }
-        bases.add(InheritanceSpecifier(_locFrom(start), baseName, args));
+        bases.add(InheritanceSpecifier(_locFrom(bStart), bName, args));
       } while (_tryConsume(TokenKind.Comma));
     }
 
     _expect(TokenKind.LBrace);
     final members = <AstNode>[];
-    while (!_check(TokenKind.RBrace) && !_isEof) {
-      members.add(_parseContractMember());
+    while (!_at(TokenKind.RBrace) && !_isEof) {
+      try {
+        members.add(_parseContractMember());
+      } on _ParseError {
+        _synchronize({TokenKind.RBrace, TokenKind.Semicolon});
+        _tryConsume(TokenKind.Semicolon);
+      }
     }
     _expect(TokenKind.RBrace);
-    return ContractDefinition(_locFrom(start), kind, name, bases, members);
+
+    return ContractDefinition(
+      _locFrom(start), kind, name, bases, members,
+      isAbstract: isAbstract,
+    );
   }
 
   AstNode _parseContractMember() {
-    if (_check(TokenKind.kFunction) ||
-        _check(TokenKind.kConstructor) ||
-        _check(TokenKind.kFallback) ||
-        _check(TokenKind.kReceive)) {
+    // Skip NatSpec attached to the next member.
+    while (_atAny([TokenKind.NatSpecLine, TokenKind.NatSpecBlock])) _advance();
+
+    if (_at(TokenKind.kFunction) ||
+        _at(TokenKind.kConstructor) ||
+        _at(TokenKind.kFallback) ||
+        _at(TokenKind.kReceive)) {
       return _parseFunctionDefinition();
     }
-    if (_check(TokenKind.kModifier)) return _parseModifierDefinition();
-    if (_check(TokenKind.kEvent)) return _parseEventDefinition();
-    if (_check(TokenKind.kError)) return _parseCustomErrorDefinition();
-    if (_check(TokenKind.kStruct)) return _parseStructDefinition();
-    if (_check(TokenKind.kEnum)) return _parseEnumDefinition();
+    if (_at(TokenKind.kModifier)) return _parseModifierDefinition();
+    if (_at(TokenKind.kEvent)) return _parseEventDefinition();
+    if (_at(TokenKind.kError)) return _parseCustomErrorDefinition();
+    if (_at(TokenKind.kStruct)) return _parseStructDefinition();
+    if (_at(TokenKind.kEnum)) return _parseEnumDefinition();
+    if (_at(TokenKind.kUsing)) return _parseUsingDirective();
+    if (_at(TokenKind.kType)) return _parseUserDefinedValueType();
+
     return _parseStateVariableDeclaration();
   }
 
   // ── Function definition ───────────────────────────────────────────────────
 
   FunctionDefinition _parseFunctionDefinition() {
-    final start = _current.location;
+    final start = _cur.location;
+
+    FunctionKind kind;
     String? name;
-    if (_tryConsume(TokenKind.kFunction)) {
-      if (!_checkAny([TokenKind.LParen, TokenKind.kFallback, TokenKind.kReceive])) {
-        name = _expectIdentifier();
-      }
+
+    if (_at(TokenKind.kConstructor)) {
+      _advance();
+      kind = FunctionKind.constructor;
+    } else if (_at(TokenKind.kFallback)) {
+      _advance();
+      kind = FunctionKind.fallback;
+    } else if (_at(TokenKind.kReceive)) {
+      _advance();
+      kind = FunctionKind.receive;
     } else {
-      _advance(); // constructor / fallback / receive
+      _expect(TokenKind.kFunction);
+      kind = FunctionKind.function;
+      // function name is optional (anonymous function types) but required here.
+      if (!_at(TokenKind.LParen)) name = _ident();
     }
 
     _expect(TokenKind.LParen);
-    final params = _parseParameterList();
+    final params = _parseParameterList(allowIndexed: false);
     _expect(TokenKind.RParen);
 
     var visibility = Visibility.defaultVisibility;
@@ -186,69 +217,61 @@ class Parser {
     final overrides = <String>[];
     final modifiers = <ModifierInvocation>[];
 
-    // parse specifiers
     loop:
     while (true) {
-      switch (_current.kind) {
+      switch (_cur.kind) {
         case TokenKind.kPublic:
-          visibility = Visibility.public;
-          _advance();
+          visibility = Visibility.public; _advance();
         case TokenKind.kPrivate:
-          visibility = Visibility.private;
-          _advance();
+          visibility = Visibility.private; _advance();
         case TokenKind.kInternal:
-          visibility = Visibility.internal;
-          _advance();
+          visibility = Visibility.internal; _advance();
         case TokenKind.kExternal:
-          visibility = Visibility.external;
-          _advance();
+          visibility = Visibility.external; _advance();
         case TokenKind.kPure:
-          mutability = StateMutability.pure;
-          _advance();
+          mutability = StateMutability.pure; _advance();
         case TokenKind.kView:
-          mutability = StateMutability.view;
-          _advance();
+          mutability = StateMutability.view; _advance();
         case TokenKind.kPayable:
-          mutability = StateMutability.payable;
-          _advance();
+          mutability = StateMutability.payable; _advance();
         case TokenKind.kVirtual:
-          isVirtual = true;
-          _advance();
+          isVirtual = true; _advance();
         case TokenKind.kOverride:
           _advance();
           if (_tryConsume(TokenKind.LParen)) {
-            while (!_check(TokenKind.RParen) && !_isEof) {
-              overrides.add(_expectIdentifier());
-              if (!_tryConsume(TokenKind.Comma)) break;
-            }
+            overrides.add(_ident());
+            while (_tryConsume(TokenKind.Comma)) overrides.add(_ident());
             _expect(TokenKind.RParen);
           }
         case TokenKind.Identifier:
-          final name2 = _current.lexeme;
-          _advance();
-          final args = <Expression>[];
+          // Modifier invocation
+          final mStart = _cur.location;
+          final mName = _advance().lexeme;
+          final mArgs = <Expression>[];
           if (_tryConsume(TokenKind.LParen)) {
-            while (!_check(TokenKind.RParen) && !_isEof) {
-              args.add(_parseExpression());
-              if (!_tryConsume(TokenKind.Comma)) break;
+            if (!_at(TokenKind.RParen)) {
+              mArgs.add(_parseExpression());
+              while (_tryConsume(TokenKind.Comma)) {
+                mArgs.add(_parseExpression());
+              }
             }
             _expect(TokenKind.RParen);
           }
-          modifiers.add(ModifierInvocation(_current.location, name2, args));
+          modifiers.add(ModifierInvocation(_locFrom(mStart), mName, mArgs));
         default:
           break loop;
       }
     }
 
-    List<Parameter> returnParams = [];
+    var returnParams = <Parameter>[];
     if (_tryConsume(TokenKind.kReturns)) {
       _expect(TokenKind.LParen);
-      returnParams = _parseParameterList();
+      returnParams = _parseParameterList(allowIndexed: false);
       _expect(TokenKind.RParen);
     }
 
     Block? body;
-    if (_check(TokenKind.LBrace)) {
+    if (_at(TokenKind.LBrace)) {
       body = _parseBlock();
     } else {
       _expect(TokenKind.Semicolon);
@@ -256,6 +279,7 @@ class Parser {
 
     return FunctionDefinition(
       location: _locFrom(start),
+      kind: kind,
       name: name,
       parameters: params,
       returnParameters: returnParams,
@@ -268,26 +292,25 @@ class Parser {
     );
   }
 
-  List<Parameter> _parseParameterList() {
+  List<Parameter> _parseParameterList({bool allowIndexed = false}) {
     final params = <Parameter>[];
-    if (_check(TokenKind.RParen)) return params;
+    if (_at(TokenKind.RParen)) return params;
     do {
-      final pStart = _current.location;
+      final pStart = _cur.location;
       final type = _parseTypeName();
-      DataLocation? loc2;
-      if (_check(TokenKind.kStorage)) {
-        loc2 = DataLocation.storage;
-        _advance();
-      } else if (_check(TokenKind.kMemory)) {
-        loc2 = DataLocation.memory;
-        _advance();
-      } else if (_check(TokenKind.kCalldata)) {
-        loc2 = DataLocation.calldata;
-        _advance();
+      var indexed = false;
+      DataLocation? loc;
+      if (allowIndexed && _tryConsume(TokenKind.kIndexed)) {
+        indexed = true;
+      } else {
+        loc = _tryParseDataLocation();
       }
       String? pName;
-      if (_check(TokenKind.Identifier)) pName = _advance().lexeme;
-      params.add(Parameter(_locFrom(pStart), type, pName, loc2));
+      if (_isIdentifier()) pName = _advance().lexeme;
+      params.add(Parameter(
+        _locFrom(pStart), type, pName, loc,
+        indexed: indexed,
+      ));
     } while (_tryConsume(TokenKind.Comma));
     return params;
   }
@@ -296,50 +319,70 @@ class Parser {
 
   ModifierDefinition _parseModifierDefinition() {
     final start = _expect(TokenKind.kModifier).location;
-    final name = _expectIdentifier();
-    _expect(TokenKind.LParen);
-    final params = _parseParameterList();
-    _expect(TokenKind.RParen);
-    // skip virtual/override
-    while (_checkAny([TokenKind.kVirtual, TokenKind.kOverride])) _advance();
+    final name = _ident();
+    var params = <Parameter>[];
+    if (_at(TokenKind.LParen)) {
+      _advance();
+      params = _parseParameterList(allowIndexed: false);
+      _expect(TokenKind.RParen);
+    }
+    var isVirtual = false;
+    final overrides = <String>[];
+    while (true) {
+      if (_tryConsume(TokenKind.kVirtual)) { isVirtual = true; continue; }
+      if (_at(TokenKind.kOverride)) {
+        _advance();
+        if (_tryConsume(TokenKind.LParen)) {
+          overrides.add(_ident());
+          while (_tryConsume(TokenKind.Comma)) overrides.add(_ident());
+          _expect(TokenKind.RParen);
+        }
+        continue;
+      }
+      break;
+    }
     final body = _parseBlock();
-    return ModifierDefinition(_locFrom(start), name, params, body);
+    return ModifierDefinition(
+      _locFrom(start), name, params, body,
+      isVirtual: isVirtual,
+      overrideSpecifier: overrides,
+    );
   }
 
-  // ── Event / Error ─────────────────────────────────────────────────────────
+  // ── Event / error ─────────────────────────────────────────────────────────
 
   EventDefinition _parseEventDefinition() {
     final start = _expect(TokenKind.kEvent).location;
-    final name = _expectIdentifier();
+    final name = _ident();
     _expect(TokenKind.LParen);
-    final params = _parseParameterList();
+    final params = _parseParameterList(allowIndexed: true);
     _expect(TokenKind.RParen);
-    final anon = _tryConsume(TokenKind.kPure); // anonymous keyword
+    final anonymous = _tryConsume(TokenKind.kAnonymous);
     _expect(TokenKind.Semicolon);
-    return EventDefinition(_locFrom(start), name, params, anon);
+    return EventDefinition(_locFrom(start), name, params, anonymous);
   }
 
   CustomErrorDefinition _parseCustomErrorDefinition() {
     final start = _expect(TokenKind.kError).location;
-    final name = _expectIdentifier();
+    final name = _ident();
     _expect(TokenKind.LParen);
-    final params = _parseParameterList();
+    final params = _parseParameterList(allowIndexed: false);
     _expect(TokenKind.RParen);
     _expect(TokenKind.Semicolon);
     return CustomErrorDefinition(_locFrom(start), name, params);
   }
 
-  // ── Struct / Enum ─────────────────────────────────────────────────────────
+  // ── Struct / enum ─────────────────────────────────────────────────────────
 
   StructDefinition _parseStructDefinition() {
     final start = _expect(TokenKind.kStruct).location;
-    final name = _expectIdentifier();
+    final name = _ident();
     _expect(TokenKind.LBrace);
     final members = <VariableDeclaration>[];
-    while (!_check(TokenKind.RBrace) && !_isEof) {
-      final mStart = _current.location;
+    while (!_at(TokenKind.RBrace) && !_isEof) {
+      final mStart = _cur.location;
       final type = _parseTypeName();
-      final mName = _expectIdentifier();
+      final mName = _ident();
       _expect(TokenKind.Semicolon);
       members.add(VariableDeclaration(_locFrom(mStart), type, mName, null));
     }
@@ -349,49 +392,77 @@ class Parser {
 
   EnumDefinition _parseEnumDefinition() {
     final start = _expect(TokenKind.kEnum).location;
-    final name = _expectIdentifier();
+    final name = _ident();
     _expect(TokenKind.LBrace);
     final values = <String>[];
-    while (!_check(TokenKind.RBrace) && !_isEof) {
-      values.add(_expectIdentifier());
-      if (!_tryConsume(TokenKind.Comma)) break;
+    if (!_at(TokenKind.RBrace)) {
+      values.add(_ident());
+      while (_tryConsume(TokenKind.Comma) && !_at(TokenKind.RBrace)) {
+        values.add(_ident());
+      }
     }
     _expect(TokenKind.RBrace);
     return EnumDefinition(_locFrom(start), name, values);
   }
 
-  // ── State variable ────────────────────────────────────────────────────────
+  // ── Using directive ───────────────────────────────────────────────────────
+
+  UsingDirective _parseUsingDirective() {
+    final start = _expect(TokenKind.kUsing).location;
+    final libName = _qualifiedName();
+    _expect(TokenKind.kFor);
+    TypeName? forType;
+    if (!_at(TokenKind.Star)) forType = _parseTypeName();
+    else _advance();
+    _expect(TokenKind.Semicolon);
+    return UsingDirective(_locFrom(start), libName, forType);
+  }
+
+  // ── User-defined value type ────────────────────────────────────────────────
+
+  UserDefinedValueTypeDefinition _parseUserDefinedValueType() {
+    final start = _expect(TokenKind.kType).location;
+    final name = _ident();
+    _expect(TokenKind.kIs);
+    final underlying = _parseTypeName();
+    _expect(TokenKind.Semicolon);
+    return UserDefinedValueTypeDefinition(_locFrom(start), name, underlying);
+  }
+
+  // ── State variable ─────────────────────────────────────────────────────────
 
   StateVariableDeclaration _parseStateVariableDeclaration() {
-    final start = _current.location;
+    final start = _cur.location;
     final type = _parseTypeName();
     var visibility = Visibility.internal;
     var mutability = VariableMutability.mutable;
 
     loop:
     while (true) {
-      switch (_current.kind) {
+      switch (_cur.kind) {
         case TokenKind.kPublic:
-          visibility = Visibility.public;
-          _advance();
+          visibility = Visibility.public; _advance();
         case TokenKind.kPrivate:
-          visibility = Visibility.private;
-          _advance();
+          visibility = Visibility.private; _advance();
         case TokenKind.kInternal:
-          visibility = Visibility.internal;
-          _advance();
+          visibility = Visibility.internal; _advance();
         case TokenKind.kImmutable:
-          mutability = VariableMutability.immutable;
-          _advance();
+          mutability = VariableMutability.immutable; _advance();
         case TokenKind.kConstant:
-          mutability = VariableMutability.constant;
+          mutability = VariableMutability.constant; _advance();
+        case TokenKind.kOverride:
           _advance();
+          if (_tryConsume(TokenKind.LParen)) {
+            _ident();
+            while (_tryConsume(TokenKind.Comma)) _ident();
+            _expect(TokenKind.RParen);
+          }
         default:
           break loop;
       }
     }
 
-    final name = _expectIdentifier();
+    final name = _ident();
     Expression? init;
     if (_tryConsume(TokenKind.Eq)) init = _parseExpression();
     _expect(TokenKind.Semicolon);
@@ -399,20 +470,25 @@ class Parser {
         _locFrom(start), type, name, visibility, mutability, init);
   }
 
-  // ── Statements ────────────────────────────────────────────────────────────
+  // ── Statements ─────────────────────────────────────────────────────────────
 
   Block _parseBlock() {
     final start = _expect(TokenKind.LBrace).location;
     final stmts = <Statement>[];
-    while (!_check(TokenKind.RBrace) && !_isEof) {
-      stmts.add(_parseStatement());
+    while (!_at(TokenKind.RBrace) && !_isEof) {
+      try {
+        stmts.add(_parseStatement());
+      } on _ParseError {
+        _synchronize({TokenKind.Semicolon, TokenKind.RBrace});
+        _tryConsume(TokenKind.Semicolon);
+      }
     }
     _expect(TokenKind.RBrace);
     return Block(_locFrom(start), stmts);
   }
 
   Statement _parseStatement() {
-    switch (_current.kind) {
+    switch (_cur.kind) {
       case TokenKind.LBrace:
         return _parseBlock();
       case TokenKind.kReturn:
@@ -439,15 +515,19 @@ class Parser {
         return _parseRevert();
       case TokenKind.kAssembly:
         return _parseAssembly();
+      case TokenKind.kUnchecked:
+        return _parseUnchecked();
+      case TokenKind.kTry:
+        return _parseTry();
       default:
-        return _parseExpressionOrDeclarationStatement();
+        return _parseExprOrVarDecl();
     }
   }
 
   ReturnStatement _parseReturn() {
     final start = _expect(TokenKind.kReturn).location;
     Expression? expr;
-    if (!_check(TokenKind.Semicolon)) expr = _parseExpression();
+    if (!_at(TokenKind.Semicolon)) expr = _parseExpression();
     _expect(TokenKind.Semicolon);
     return ReturnStatement(_locFrom(start), expr);
   }
@@ -475,18 +555,21 @@ class Parser {
     final start = _expect(TokenKind.kFor).location;
     _expect(TokenKind.LParen);
     Statement? init;
-    if (!_check(TokenKind.Semicolon)) init = _parseStatement();
-    else _expect(TokenKind.Semicolon);
+    if (!_at(TokenKind.Semicolon)) {
+      init = _parseExprOrVarDecl();
+    } else {
+      _advance(); // consume `;`
+    }
     Expression? cond;
-    if (!_check(TokenKind.Semicolon)) cond = _parseExpression();
+    if (!_at(TokenKind.Semicolon)) cond = _parseExpression();
     _expect(TokenKind.Semicolon);
-    ExpressionStatement? loop2;
-    if (!_check(TokenKind.RParen)) {
+    ExpressionStatement? loop;
+    if (!_at(TokenKind.RParen)) {
       final e = _parseExpression();
-      loop2 = ExpressionStatement(e.location, e);
+      loop = ExpressionStatement(e.location, e);
     }
     _expect(TokenKind.RParen);
-    return ForStatement(_locFrom(start), init, cond, loop2, _parseStatement());
+    return ForStatement(_locFrom(start), init, cond, loop, _parseStatement());
   }
 
   DoWhileStatement _parseDo() {
@@ -509,25 +592,46 @@ class Parser {
 
   RevertStatement _parseRevert() {
     final start = _expect(TokenKind.kRevert).location;
+    // Optional: bare `revert;`
+    if (_at(TokenKind.Semicolon)) {
+      _advance();
+      final loc = _locFrom(start);
+      return RevertStatement(
+        loc,
+        FunctionCall(
+          loc,
+          Identifier(loc, 'revert'),
+          const [],
+          const [],
+        ),
+      );
+    }
     final expr = _parseExpression();
     _expect(TokenKind.Semicolon);
     return RevertStatement(_locFrom(start), expr);
   }
 
+  UncheckedStatement _parseUnchecked() {
+    final start = _expect(TokenKind.kUnchecked).location;
+    final body = _parseBlock();
+    return UncheckedStatement(_locFrom(start), body);
+  }
+
   AssemblyStatement _parseAssembly() {
     final start = _expect(TokenKind.kAssembly).location;
     String? dialect;
-    if (_check(TokenKind.StringLiteral)) dialect = _advance().lexeme;
+    if (_at(TokenKind.StringLiteral)) dialect = _advance().lexeme;
     _expect(TokenKind.LBrace);
     final buf = StringBuffer();
     var depth = 1;
     while (!_isEof && depth > 0) {
-      if (_check(TokenKind.LBrace)) depth++;
-      if (_check(TokenKind.RBrace)) {
+      if (_at(TokenKind.LBrace)) depth++;
+      if (_at(TokenKind.RBrace)) {
         depth--;
         if (depth == 0) break;
       }
-      buf.write(_current.lexeme.isEmpty ? _current.kind.name : _current.lexeme);
+      final lex = _cur.lexeme;
+      buf.write(lex.isEmpty ? _cur.kind.name : lex);
       buf.write(' ');
       _advance();
     }
@@ -535,28 +639,96 @@ class Parser {
     return AssemblyStatement(_locFrom(start), dialect, buf.toString().trim());
   }
 
-  Statement _parseExpressionOrDeclarationStatement() {
-    final start = _current.location;
-    // Heuristic: if it looks like a type name, try variable declaration.
-    if (_looksLikeTypeName()) {
-      final type = _parseTypeName();
-      DataLocation? dataLoc;
-      if (_check(TokenKind.kStorage)) {
-        dataLoc = DataLocation.storage; _advance();
-      } else if (_check(TokenKind.kMemory)) {
-        dataLoc = DataLocation.memory; _advance();
-      } else if (_check(TokenKind.kCalldata)) {
-        dataLoc = DataLocation.calldata; _advance();
-      }
-      final decl = VariableDeclaration(_locFrom(start), type, _expectIdentifier(), dataLoc);
-      Expression? init;
-      if (_tryConsume(TokenKind.Eq)) init = _parseExpression();
-      _expect(TokenKind.Semicolon);
-      return VariableDeclarationStatement(_locFrom(start), [decl], init);
+  TryStatement _parseTry() {
+    final start = _expect(TokenKind.kTry).location;
+    final call = _parseExpression(); // external call
+    // optional returns clause
+    if (_tryConsume(TokenKind.kReturns)) {
+      _expect(TokenKind.LParen);
+      _parseParameterList(allowIndexed: false);
+      _expect(TokenKind.RParen);
     }
+    final clauses = <CatchClause>[];
+    // at least one catch block required
+    do {
+      clauses.add(_parseCatchClause());
+    } while (_at(TokenKind.kCatch));
+    return TryStatement(_locFrom(start), call, clauses);
+  }
+
+  CatchClause _parseCatchClause() {
+    final start = _expect(TokenKind.kCatch).location;
+    String? errorName;
+    var params = <Parameter>[];
+    if (!_at(TokenKind.LBrace)) {
+      if (_isIdentifier()) errorName = _advance().lexeme;
+      if (_at(TokenKind.LParen)) {
+        _advance();
+        params = _parseParameterList(allowIndexed: false);
+        _expect(TokenKind.RParen);
+      }
+    }
+    final body = _parseBlock();
+    return CatchClause(_locFrom(start), errorName, params, body);
+  }
+
+  /// Parses either a local variable declaration or an expression statement.
+  Statement _parseExprOrVarDecl() {
+    final start = _cur.location;
+
+    // Tuple destructuring: `(T x, T y) = expr;` or `(x, y) = expr;`
+    if (_at(TokenKind.LParen)) {
+      // Could be a tuple expression or a tuple-destructuring var-decl.
+      // Try both; fall back to expression if no type names inside.
+      final saved = _pos;
+      try {
+        return _parseTupleVarDecl(start);
+      } on _ParseError {
+        _pos = saved;
+      }
+    }
+
+    if (_looksLikeTypeName()) {
+      return _parseVarDecl(start);
+    }
+
     final expr = _parseExpression();
     _expect(TokenKind.Semicolon);
     return ExpressionStatement(_locFrom(start), expr);
+  }
+
+  Statement _parseTupleVarDecl(SourceLocation start) {
+    _expect(TokenKind.LParen);
+    final decls = <VariableDeclaration?>[];
+    do {
+      if (_at(TokenKind.Comma) || _at(TokenKind.RParen)) {
+        decls.add(null);
+      } else if (_looksLikeTypeName()) {
+        final dStart = _cur.location;
+        final type = _parseTypeName();
+        final loc = _tryParseDataLocation();
+        final name = _ident();
+        decls.add(VariableDeclaration(_locFrom(dStart), type, name, loc));
+      } else {
+        throw _ParseError();
+      }
+    } while (_tryConsume(TokenKind.Comma));
+    _expect(TokenKind.RParen);
+    _expect(TokenKind.Eq);
+    final init = _parseExpression();
+    _expect(TokenKind.Semicolon);
+    return VariableDeclarationStatement(_locFrom(start), decls, init);
+  }
+
+  Statement _parseVarDecl(SourceLocation start) {
+    final type = _parseTypeName();
+    final loc = _tryParseDataLocation();
+    final name = _ident();
+    Expression? init;
+    if (_tryConsume(TokenKind.Eq)) init = _parseExpression();
+    _expect(TokenKind.Semicolon);
+    final decl = VariableDeclaration(_locFrom(start), type, name, loc);
+    return VariableDeclarationStatement(_locFrom(start), [decl], init);
   }
 
   // ── Expressions ───────────────────────────────────────────────────────────
@@ -566,12 +738,12 @@ class Parser {
   Expression _parseAssignment() {
     final left = _parseTernary();
     const assignOps = {
-      TokenKind.Eq, TokenKind.PlusEq, TokenKind.MinusEq, TokenKind.StarEq,
-      TokenKind.SlashEq, TokenKind.PercentEq, TokenKind.AmpEq,
-      TokenKind.PipeEq, TokenKind.CaretEq, TokenKind.LtLtEq,
-      TokenKind.GtGtEq, TokenKind.GtGtGtEq,
+      TokenKind.Eq, TokenKind.PlusEq, TokenKind.MinusEq,
+      TokenKind.StarEq, TokenKind.SlashEq, TokenKind.PercentEq,
+      TokenKind.AmpEq, TokenKind.PipeEq, TokenKind.CaretEq,
+      TokenKind.LtLtEq, TokenKind.GtGtEq, TokenKind.GtGtGtEq,
     };
-    if (assignOps.contains(_current.kind)) {
+    if (assignOps.contains(_cur.kind)) {
       final op = _advance().lexeme;
       final right = _parseAssignment();
       return Assignment(left.location.combine(right.location), op, left, right);
@@ -590,19 +762,7 @@ class Parser {
     return cond;
   }
 
-  Expression _parseBinary(List<Set<TokenKind>> precedence, int level,
-      Expression Function() next) {
-    if (level >= precedence.length) return next();
-    var left = _parseBinary(precedence, level + 1, next);
-    while (precedence[level].contains(_current.kind)) {
-      final op = _advance().lexeme;
-      final right = _parseBinary(precedence, level + 1, next);
-      left = BinaryOperation(left.location.combine(right.location), op, left, right);
-    }
-    return left;
-  }
-
-  static const _binaryPrecedence = [
+  static const _precTable = [
     {TokenKind.PipePipe},
     {TokenKind.AmpAmp},
     {TokenKind.Pipe},
@@ -616,23 +776,35 @@ class Parser {
     {TokenKind.StarStar},
   ];
 
-  Expression _parseOr() =>
-      _parseBinary(_binaryPrecedence, 0, _parseUnary);
+  Expression _parseOr() => _parseBinaryAt(0);
+
+  Expression _parseBinaryAt(int level) {
+    if (level >= _precTable.length) return _parseUnary();
+    var left = _parseBinaryAt(level + 1);
+    while (_precTable[level].contains(_cur.kind)) {
+      final op = _advance().lexeme;
+      final right = _parseBinaryAt(level + 1);
+      left = BinaryOperation(
+          left.location.combine(right.location), op, left, right);
+    }
+    return left;
+  }
 
   Expression _parseUnary() {
-    final start = _current.location;
-    switch (_current.kind) {
+    final start = _cur.location;
+    switch (_cur.kind) {
       case TokenKind.Bang:
       case TokenKind.Tilde:
       case TokenKind.Minus:
         final op = _advance().lexeme;
-        final sub = _parseUnary();
-        return UnaryOperation(_locFrom(start), op, sub, true);
+        return UnaryOperation(_locFrom(start), op, _parseUnary(), true);
       case TokenKind.PlusPlus:
       case TokenKind.MinusMinus:
         final op = _advance().lexeme;
-        final sub = _parseUnary();
-        return UnaryOperation(_locFrom(start), op, sub, true);
+        return UnaryOperation(_locFrom(start), op, _parseUnary(), true);
+      case TokenKind.kDelete:
+        _advance();
+        return DeleteExpression(_locFrom(start), _parseUnary());
       default:
         return _parsePostfix();
     }
@@ -640,54 +812,92 @@ class Parser {
 
   Expression _parsePostfix() {
     var expr = _parsePrimary();
-    loop:
+    outer:
     while (true) {
-      switch (_current.kind) {
+      switch (_cur.kind) {
         case TokenKind.Dot:
           _advance();
-          final member = _expectIdentifier();
+          final member = _ident();
           expr = MemberAccess(expr.location, expr, member);
+
         case TokenKind.LBracket:
           _advance();
-          Expression? idx;
-          if (!_check(TokenKind.RBracket)) idx = _parseExpression();
-          _expect(TokenKind.RBracket);
-          expr = IndexAccess(expr.location, expr, idx);
+          if (_at(TokenKind.Colon)) {
+            // `arr[:]` or `arr[:n]`
+            _advance();
+            final end = _at(TokenKind.RBracket) ? null : _parseExpression();
+            _expect(TokenKind.RBracket);
+            expr = IndexRangeAccess(expr.location, expr, null, end);
+          } else {
+            final idx = _parseExpression();
+            if (_tryConsume(TokenKind.Colon)) {
+              final end = _at(TokenKind.RBracket) ? null : _parseExpression();
+              _expect(TokenKind.RBracket);
+              expr = IndexRangeAccess(expr.location, expr, idx, end);
+            } else {
+              _expect(TokenKind.RBracket);
+              expr = IndexAccess(expr.location, expr, idx);
+            }
+          }
+
+        case TokenKind.LBrace:
+          // `f{value: v}(…)` call options
+          _advance();
+          final opts = <String, Expression>{};
+          while (!_at(TokenKind.RBrace) && !_isEof) {
+            final k = _ident();
+            _expect(TokenKind.Colon);
+            opts[k] = _parseExpression();
+            if (!_tryConsume(TokenKind.Comma)) break;
+          }
+          _expect(TokenKind.RBrace);
+          expr = FunctionCallOptions(expr.location, expr, opts);
+
         case TokenKind.LParen:
           _advance();
           final args = <Expression>[];
           final names = <String?>[];
-          while (!_check(TokenKind.RParen) && !_isEof) {
-            // named argument
-            if (_check(TokenKind.Identifier) && _peekKind(1) == TokenKind.Colon) {
-              names.add(_advance().lexeme);
-              _advance(); // :
-            } else {
-              names.add(null);
+          // Named arguments: `{a: 1, b: 2}` syntax inside parens
+          if (_at(TokenKind.LBrace)) {
+            _advance();
+            while (!_at(TokenKind.RBrace) && !_isEof) {
+              names.add(_ident());
+              _expect(TokenKind.Colon);
+              args.add(_parseExpression());
+              if (!_tryConsume(TokenKind.Comma)) break;
             }
-            args.add(_parseExpression());
-            if (!_tryConsume(TokenKind.Comma)) break;
+            _expect(TokenKind.RBrace);
+          } else {
+            while (!_at(TokenKind.RParen) && !_isEof) {
+              names.add(null);
+              args.add(_parseExpression());
+              if (!_tryConsume(TokenKind.Comma)) break;
+            }
           }
           _expect(TokenKind.RParen);
           expr = FunctionCall(expr.location, expr, args, names);
+
         case TokenKind.PlusPlus:
+          expr = UnaryOperation(expr.location, _advance().lexeme, expr, false);
         case TokenKind.MinusMinus:
-          final op = _advance().lexeme;
-          expr = UnaryOperation(expr.location, op, expr, false);
+          expr = UnaryOperation(expr.location, _advance().lexeme, expr, false);
+
         default:
-          break loop;
+          break outer;
       }
     }
     return expr;
   }
 
   Expression _parsePrimary() {
-    final start = _current.location;
-    switch (_current.kind) {
+    final start = _cur.location;
+
+    switch (_cur.kind) {
+      // ── Literals ────────────────────────────────────────────────────────
       case TokenKind.NumberLiteral:
         final val = _advance().lexeme;
         String? sub;
-        if (_checkAny([
+        if (_atAny([
           TokenKind.kWei, TokenKind.kGwei, TokenKind.kEther,
           TokenKind.kSeconds, TokenKind.kMinutes, TokenKind.kHours,
           TokenKind.kDays, TokenKind.kWeeks,
@@ -697,13 +907,18 @@ class Parser {
         return Literal(_locFrom(start), LiteralKind.number, val, sub);
 
       case TokenKind.StringLiteral:
-        return Literal(_locFrom(start), LiteralKind.string, _advance().lexeme, null);
+        // Concatenated string literals: `"a" "b"` → one node.
+        final buf = StringBuffer(_advance().lexeme);
+        while (_at(TokenKind.StringLiteral)) buf.write(_advance().lexeme);
+        return Literal(_locFrom(start), LiteralKind.string, buf.toString(), null);
 
       case TokenKind.UnicodeStringLiteral:
-        return Literal(_locFrom(start), LiteralKind.unicodeString, _advance().lexeme, null);
+        return Literal(
+            _locFrom(start), LiteralKind.unicodeString, _advance().lexeme, null);
 
       case TokenKind.HexStringLiteral:
-        return Literal(_locFrom(start), LiteralKind.hexString, _advance().lexeme, null);
+        return Literal(
+            _locFrom(start), LiteralKind.hexString, _advance().lexeme, null);
 
       case TokenKind.TrueLiteral:
         _advance();
@@ -713,6 +928,7 @@ class Parser {
         _advance();
         return Literal(_locFrom(start), LiteralKind.bool$, 'false', null);
 
+      // ── this / super ────────────────────────────────────────────────────
       case TokenKind.kThis:
         _advance();
         return Identifier(_locFrom(start), 'this');
@@ -721,82 +937,126 @@ class Parser {
         _advance();
         return Identifier(_locFrom(start), 'super');
 
+      // ── type(X) ─────────────────────────────────────────────────────────
+      case TokenKind.kType:
+        _advance();
+        _expect(TokenKind.LParen);
+        final typeName = _parseTypeName();
+        _expect(TokenKind.RParen);
+        return TypeExpression(_locFrom(start), typeName);
+
+      // ── new T ────────────────────────────────────────────────────────────
+      case TokenKind.kNew:
+        _advance();
+        return NewExpression(_locFrom(start), _parseTypeName());
+
+      // ── Parenthesised / tuple ────────────────────────────────────────────
       case TokenKind.LParen:
         _advance();
-        if (_check(TokenKind.RParen)) {
+        if (_at(TokenKind.RParen)) {
           _advance();
           return TupleExpression(_locFrom(start), [], false);
         }
-        final expr = _parseExpression();
-        if (_tryConsume(TokenKind.Comma)) {
-          final components = <Expression?>[expr];
-          while (!_check(TokenKind.RParen) && !_isEof) {
-            if (_check(TokenKind.Comma)) {
-              components.add(null);
-            } else {
-              components.add(_parseExpression());
-            }
-            if (!_tryConsume(TokenKind.Comma)) break;
+        final first = _parseExpression();
+        if (_at(TokenKind.RParen)) {
+          _advance();
+          return first; // plain parenthesised expression
+        }
+        // Tuple
+        final components = <Expression?>[first];
+        while (_tryConsume(TokenKind.Comma)) {
+          if (_at(TokenKind.RParen) || _at(TokenKind.Comma)) {
+            components.add(null);
+          } else {
+            components.add(_parseExpression());
           }
-          _expect(TokenKind.RParen);
-          return TupleExpression(_locFrom(start), components, false);
         }
         _expect(TokenKind.RParen);
-        return expr;
+        return TupleExpression(_locFrom(start), components, false);
 
-      case TokenKind.kNew:
+      // ── Array literal [a, b, c] ──────────────────────────────────────────
+      case TokenKind.LBracket:
         _advance();
-        final type = _parseTypeName();
-        return NewExpression(_locFrom(start), type);
+        final items = <Expression?>[];
+        if (!_at(TokenKind.RBracket)) {
+          items.add(_parseExpression());
+          while (_tryConsume(TokenKind.Comma)) {
+            if (_at(TokenKind.RBracket)) break;
+            items.add(_parseExpression());
+          }
+        }
+        _expect(TokenKind.RBracket);
+        return TupleExpression(_locFrom(start), items, true);
 
-      case TokenKind.Identifier:
-        return Identifier(_locFrom(start), _advance().lexeme);
-
+      // ── Type conversion / identifier ─────────────────────────────────────
       default:
-        if (_looksLikeTypeName()) {
-          final type = _parseTypeName();
+        // Elementary type conversion: `uint256(x)`, `address(y)`, etc.
+        if (_isElementaryType(_cur.kind)) {
+          final typeName = _parseTypeName();
           _expect(TokenKind.LParen);
           final inner = _parseExpression();
           _expect(TokenKind.RParen);
-          return TypeConversion(_locFrom(start), type, inner);
+          return TypeConversion(_locFrom(start), typeName, inner);
         }
-        diagnostics.error(
-          'Expected expression, got "${_current.kind.name}"',
-          location: _current.location,
+
+        if (_at(TokenKind.Identifier)) {
+          return Identifier(_locFrom(start), _advance().lexeme);
+        }
+
+        // Keywords that are valid as identifiers in expression position.
+        if (_isKeywordUsableAsIdentifier(_cur.kind)) {
+          return Identifier(_locFrom(start), _advance().lexeme);
+        }
+
+        _error(
+          'Expected expression, got "${_cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme}"',
         );
         _advance();
         return Literal(_locFrom(start), LiteralKind.number, '0', null);
     }
   }
 
-  // ── Type names ────────────────────────────────────────────────────────────
+  // ── Type names ─────────────────────────────────────────────────────────────
 
   TypeName _parseTypeName() {
-    final start = _current.location;
+    final start = _cur.location;
     TypeName base;
 
-    if (_check(TokenKind.kMapping)) {
-      base = _parseMapping();
-    } else if (_check(TokenKind.kFunction)) {
-      base = _parseFunctionTypeName();
-    } else if (_isElementaryType(_current.kind)) {
-      final name = _current.lexeme.isEmpty ? _current.kind.name : _current.lexeme;
-      final width = _current.intWidth;
+    if (_at(TokenKind.kMapping)) {
       _advance();
+      _expect(TokenKind.LParen);
+      final key = _parseTypeName();
+      _expect(TokenKind.Arrow);
+      final val = _parseTypeName();
+      _expect(TokenKind.RParen);
+      base = MappingTypeName(_locFrom(start), key, val);
+    } else if (_at(TokenKind.kFunction)) {
+      base = _parseFunctionTypeName();
+    } else if (_isElementaryType(_cur.kind)) {
+      final name = _cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme;
+      final width = _cur.intWidth;
+      _advance();
+      // `address payable`
+      if (name == 'address' && _tryConsume(TokenKind.kPayable)) {
+        return ElementaryTypeName(
+            _locFrom(start), 'address payable', intWidth: 0);
+      }
       base = ElementaryTypeName(_locFrom(start), name, intWidth: width);
     } else {
-      final parts = [_expectIdentifier()];
-      while (_check(TokenKind.Dot)) {
+      // User-defined (possibly qualified: A.B)
+      final parts = [_ident()];
+      while (_at(TokenKind.Dot)) {
         _advance();
-        parts.add(_expectIdentifier());
+        parts.add(_ident());
       }
       base = UserDefinedTypeName(_locFrom(start), parts);
     }
 
-    while (_check(TokenKind.LBracket)) {
+    // Array suffixes
+    while (_at(TokenKind.LBracket)) {
       _advance();
       Expression? len;
-      if (!_check(TokenKind.RBracket)) len = _parseExpression();
+      if (!_at(TokenKind.RBracket)) len = _parseExpression();
       _expect(TokenKind.RBracket);
       base = ArrayTypeName(_locFrom(start), base, len);
     }
@@ -804,35 +1064,30 @@ class Parser {
     return base;
   }
 
-  MappingTypeName _parseMapping() {
-    final start = _expect(TokenKind.kMapping).location;
-    _expect(TokenKind.LParen);
-    final key = _parseTypeName();
-    _expect(TokenKind.Arrow);
-    final value = _parseTypeName();
-    _expect(TokenKind.RParen);
-    return MappingTypeName(_locFrom(start), key, value);
-  }
-
   FunctionTypeName _parseFunctionTypeName() {
     final start = _expect(TokenKind.kFunction).location;
     _expect(TokenKind.LParen);
-    final params = _parseParameterList();
+    final params = _parseParameterList(allowIndexed: false);
     _expect(TokenKind.RParen);
     var vis = Visibility.internal;
     var mut = StateMutability.nonpayable;
     while (true) {
-      if (_checkAny([TokenKind.kPublic, TokenKind.kExternal,
-          TokenKind.kInternal, TokenKind.kPrivate])) {
-        vis = _visibilityFrom(_advance().kind);
-      } else if (_checkAny([TokenKind.kPure, TokenKind.kView, TokenKind.kPayable])) {
-        mut = _mutabilityFrom(_advance().kind);
-      } else break;
+      switch (_cur.kind) {
+        case TokenKind.kPublic: vis = Visibility.public; _advance();
+        case TokenKind.kExternal: vis = Visibility.external; _advance();
+        case TokenKind.kInternal: vis = Visibility.internal; _advance();
+        case TokenKind.kPrivate: vis = Visibility.private; _advance();
+        case TokenKind.kPure: mut = StateMutability.pure; _advance();
+        case TokenKind.kView: mut = StateMutability.view; _advance();
+        case TokenKind.kPayable: mut = StateMutability.payable; _advance();
+        default: break;
+      }
+      break;
     }
     var returnParams = <Parameter>[];
     if (_tryConsume(TokenKind.kReturns)) {
       _expect(TokenKind.LParen);
-      returnParams = _parseParameterList();
+      returnParams = _parseParameterList(allowIndexed: false);
       _expect(TokenKind.RParen);
     }
     return FunctionTypeName(_locFrom(start), params, returnParams, mut, vis);
@@ -840,58 +1095,91 @@ class Parser {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  bool get _isEof => _current.kind == TokenKind.Eof;
+  bool get _isEof => _cur.kind == TokenKind.Eof;
 
-  bool _check(TokenKind kind) => _current.kind == kind;
+  bool _at(TokenKind k) => _cur.kind == k;
 
-  bool _checkAny(List<TokenKind> kinds) => kinds.contains(_current.kind);
+  bool _atAny(List<TokenKind> ks) => ks.contains(_cur.kind);
 
   Token _advance() {
-    final t = _current;
+    final t = _cur;
     if (_pos < tokens.length) _pos++;
     return t;
   }
 
   Token _expect(TokenKind kind) {
-    if (_current.kind == kind) return _advance();
-    diagnostics.error(
-      'Expected ${kind.name}, got ${_current.kind.name}',
-      location: _current.location,
-    );
-    return _current;
+    if (_cur.kind == kind) return _advance();
+    _error('Expected ${kind.name}, got ${_cur.kind.name}');
+    throw _ParseError();
   }
 
   bool _tryConsume(TokenKind kind) {
-    if (_current.kind == kind) {
-      _advance();
-      return true;
-    }
+    if (_cur.kind == kind) { _advance(); return true; }
     return false;
   }
 
-  String _expectIdentifier() {
-    if (_check(TokenKind.Identifier)) return _advance().lexeme;
-    // Some keywords are also valid identifiers in certain positions.
-    if (_current.lexeme.isNotEmpty) return _advance().lexeme;
-    diagnostics.error('Expected identifier', location: _current.location);
-    return '';
+  /// Parses a (possibly qualified) identifier name: `A` or `A.B`.
+  String _qualifiedName() {
+    final buf = StringBuffer(_ident());
+    while (_at(TokenKind.Dot)) {
+      _advance();
+      buf.write('.');
+      buf.write(_ident());
+    }
+    return buf.toString();
   }
 
-  TokenKind _peekKind(int offset) {
-    final i = _pos + offset;
-    return i < tokens.length ? tokens[i].kind : TokenKind.Eof;
+  /// Parses a single identifier, accepting some keywords as identifiers.
+  String _ident() {
+    if (_at(TokenKind.Identifier)) return _advance().lexeme;
+    if (_isKeywordUsableAsIdentifier(_cur.kind)) return _advance().lexeme;
+    _error('Expected identifier, got ${_cur.kind.name}');
+    throw _ParseError();
+  }
+
+  bool _isIdentifier() =>
+      _at(TokenKind.Identifier) || _isKeywordUsableAsIdentifier(_cur.kind);
+
+  DataLocation? _tryParseDataLocation() {
+    switch (_cur.kind) {
+      case TokenKind.kStorage: _advance(); return DataLocation.storage;
+      case TokenKind.kMemory: _advance(); return DataLocation.memory;
+      case TokenKind.kCalldata: _advance(); return DataLocation.calldata;
+      default: return null;
+    }
   }
 
   SourceLocation _locFrom(SourceLocation start) =>
-      start.combine(_current.location);
+      start.combine(_cur.location);
 
-  bool _looksLikeTypeName() => _isElementaryType(_current.kind) ||
-      _check(TokenKind.kMapping) ||
-      _check(TokenKind.kFunction) ||
-      (_check(TokenKind.Identifier) &&
-          (_peekKind(1) == TokenKind.Dot ||
-              _peekKind(1) == TokenKind.LBracket ||
-              _peekKind(1) == TokenKind.Identifier));
+  void _error(String msg) {
+    diagnostics.error(msg, location: _cur.location);
+  }
+
+  void _errorAndSync(String msg) {
+    _error(msg);
+    _advance();
+  }
+
+  void _synchronize(Set<TokenKind> stopAt) {
+    while (!_isEof && !stopAt.contains(_cur.kind)) _advance();
+  }
+
+  bool _looksLikeTypeName() {
+    if (_isElementaryType(_cur.kind)) return true;
+    if (_at(TokenKind.kMapping) || _at(TokenKind.kFunction)) return true;
+    // `Identifier` followed by `[`, `.`, or another identifier → type name.
+    if (_at(TokenKind.Identifier)) {
+      final next = _peekKind(1);
+      return next == TokenKind.LBracket ||
+          next == TokenKind.Dot ||
+          next == TokenKind.Identifier ||
+          next == TokenKind.kMemory ||
+          next == TokenKind.kStorage ||
+          next == TokenKind.kCalldata;
+    }
+    return false;
+  }
 
   static bool _isElementaryType(TokenKind k) => const {
         TokenKind.kAddress,
@@ -905,17 +1193,22 @@ class Parser {
         TokenKind.BytesN,
       }.contains(k);
 
-  static Visibility _visibilityFrom(TokenKind k) => switch (k) {
-        TokenKind.kPublic => Visibility.public,
-        TokenKind.kPrivate => Visibility.private,
-        TokenKind.kExternal => Visibility.external,
-        _ => Visibility.internal,
-      };
+  /// Keywords that Solidity allows as identifiers in certain positions
+  /// (member names, event names, etc.).
+  static bool _isKeywordUsableAsIdentifier(TokenKind k) => const {
+        TokenKind.kFrom,
+        TokenKind.kError,
+        TokenKind.kRevert,
+        TokenKind.kType,
+      }.contains(k);
 
-  static StateMutability _mutabilityFrom(TokenKind k) => switch (k) {
-        TokenKind.kPure => StateMutability.pure,
-        TokenKind.kView => StateMutability.view,
-        TokenKind.kPayable => StateMutability.payable,
-        _ => StateMutability.nonpayable,
-      };
+  TokenKind _peekKind(int offset) {
+    final i = _pos + offset;
+    return i < tokens.length ? tokens[i].kind : TokenKind.Eof;
+  }
 }
+
+// ── Internal error class for structured error recovery ────────────────────────
+
+class _ParseError implements Exception {}
+

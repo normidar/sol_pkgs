@@ -221,7 +221,7 @@ class IRGenerator {
       case BinaryOperation(:final operator$, :final left, :final right):
         final yulFn = _binaryOpToYul[operator$];
         if (yulFn == null) {
-          _diagnostics.error('Unsupported binary operator "$operator$"',
+          _diagnostics.error('Unsupported binary operator "${operator$}"',
               location: expr.location);
           return YulLiteral('0', YulLiteralKind.number);
         }

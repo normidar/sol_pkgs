@@ -1,4 +1,5 @@
 import 'package:sol_support/sol_support.dart';
+import 'visitor.dart';
 
 /// Base class for every node in the Solidity AST.
 abstract class AstNode {
@@ -12,5 +13,15 @@ abstract class AstNode {
   void accept(AstVisitor visitor);
 }
 
-// forward declaration so visitor.dart can be imported separately
-abstract class AstVisitor {}
+/// Abstract base for expression nodes.
+///
+/// Defined here (not in expressions.dart) so that type_names.dart can
+/// reference it without creating a circular import.
+abstract class Expression extends AstNode {
+  Expression(super.location);
+}
+
+/// Abstract base for statement nodes.
+abstract class Statement extends AstNode {
+  Statement(super.location);
+}

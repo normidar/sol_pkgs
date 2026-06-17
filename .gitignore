@@ -1,0 +1,27 @@
+# Dart / pub
+.dart_tool/
+.packages
+pubspec.lock
+build/
+doc/api/
+
+# FVM
+.fvm/flutter_sdk
+.fvm/versions
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+*.lcov
+
+# Generated
+*.g.dart
+*.freezed.dart
