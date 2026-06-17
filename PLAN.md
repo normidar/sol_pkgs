@@ -8,7 +8,7 @@
 
 | 記号 | 意味 |
 |---|---|
-| ✅ | 実装済み（動作する） |
+| ✅ | 実装済み（テスト通過） |
 | 🟡 | 骨格のみ（コンパイルは通るが機能が不完全） |
 | ❌ | 未実装 |
 | 🐛 | 既知のバグ・不整合 |
@@ -23,11 +23,12 @@
 |---|---|
 | `SourceLocation` (オフセット+長さ) | ✅ |
 | `SourceMap` (オフセット → 行/列) | ✅ |
+| `LineColumn` — `==` / `hashCode` 実装済み | ✅ |
 | `SourceUnit` / `SourceUnitRegistry` | ✅ |
 | `DiagnosticCollector` (info/warning/error/fatal) | ✅ |
 | `FatalErrorException` | ✅ |
-| `ImportRemapping` / `ImportRemapper` | ✅ |
-| テスト | ✅ |
+| `ImportRemapping` / `ImportRemapper` (コンテキスト優先修正済み) | ✅ |
+| テスト (8件通過) | ✅ |
 
 ---
 
@@ -35,57 +36,63 @@
 
 | 機能 | 状態 |
 |---|---|
-| キーワード全量 (contract/function/pure/view … ) | ✅ |
+| キーワード全量 (returns/try/catch/unchecked/indexed/anonymous 含む) | ✅ |
 | `uint8`〜`uint256` / `int8`〜`int256` / `bytes1`〜`bytes32` | ✅ |
-| 10進数・16進数・浮動小数点リテラル | ✅ |
-| 文字列 `"…"` / `unicode"…"` / `hex"…"` | ✅ |
-| 全演算子 (`**`, `>>>`, `<<=`, `>>>=` 含む) | ✅ |
+| 10進数・16進数・アンダースコア区切り (`0x1_000`) | ✅ |
+| 文字列 `"…"` / `unicode"…"` / `hex"…"` (開始引用符スキップ修正済み) | ✅ |
+| 全演算子 (`**`, `>>>`, `<<=`, `>>>=` 含む) — lexeme 設定修正済み | ✅ |
 | 単行 `//` / ブロック `/* */` コメント | ✅ |
-| テスト | ✅ |
-| **`returns` キーワードが `TokenKind` に未定義** | 🐛 |
-
-> **Bug:** `sol_parser` は `TokenKind.kReturns` を参照しているが、`sol_lexer/src/token_kind.dart` の `TokenKind` enum と `_keywords` マップに `returns` エントリが存在しない。パーサは `returns` をIdentifierとして読むため `_tryConsume(TokenKind.kReturns)` が常に失敗し、戻り型が正しく解析されない。
+| NatSpec `///` → `NatSpecLine` / `/** */` → `NatSpecBlock` | ✅ |
+| テスト (13件通過) | ✅ |
 
 ---
 
-### `sol_ast` 🟡 完成度: 中（設計は完成、クラス重複あり）
+### `sol_ast` ✅ 完成度: 高
 
 | 機能 | 状態 |
 |---|---|
-| 全宣言ノード (contract/function/event/error/struct/enum/state var) | ✅ |
-| 全文ノード (block/if/for/while/return/emit/revert/assembly …) | ✅ |
-| 全式ノード (literal/identifier/binary/call/conditional …) | ✅ |
+| 共有 enum を `enums.dart` に分離 (DataLocation/Visibility/StateMutability 等) | ✅ |
+| `AstVisitor` の二重定義問題を解消 (`ast_node.dart` に stub なし) | ✅ |
+| 全宣言ノード — `FunctionKind` (function/constructor/fallback/receive) 付き | ✅ |
+| `UsingDirective` / `UserDefinedValueTypeDefinition` | ✅ |
+| 全文ノード — `UncheckedStatement` / `TryStatement` / `CatchClause` 追加 | ✅ |
+| 全式ノード — `DeleteExpression` / `TypeExpression` / `FunctionCallOptions` 追加 | ✅ |
 | 型名ノード (elementary/array/mapping/user-defined/function) | ✅ |
-| `AstVisitor` (ダブルディスパッチ) | ✅ |
+| `Parameter.indexed` (イベントパラメータ用) | ✅ |
+| `AstVisitor` — 全新規ノードの visit メソッド (子ウォーク実装付き) | ✅ |
 | `AstNode.annotation` (後段フェーズが型情報を書き込むスロット) | ✅ |
-| テスト | ✅ |
-| **`VariableDeclaration` が2箇所に重複定義** | 🐛 |
-| **`Expression` / `Parameter` が `type_names.dart` に前方参照として重複定義** | 🐛 |
-
-> **Bug (重大):** `VariableDeclaration` クラスが `declarations.dart` と `statements.dart` の両方に定義されており、`lib/sol_ast.dart` でエクスポートするとコンパイルエラーになる可能性がある。同様に `Expression` と `Parameter` が `type_names.dart` にも前方参照として定義されており、`expressions.dart` と重複する。ファイルを整理してクラスを単一定義にまとめる必要がある。
+| テスト (2件通過) | ✅ |
 
 ---
 
-### `sol_parser` 🟡 完成度: 中
+### `sol_parser` ✅ 完成度: 高
 
 | 機能 | 状態 |
 |---|---|
-| `pragma` / `import` | ✅ |
-| `contract` / `interface` / `library` (継承込み) | ✅ |
-| `function` 全修飾子 (visibility/mutability/virtual/override) | ✅ |
-| `modifier` / `event` / `error` | ✅ |
+| `pragma` / `import` (plain/alias/named/star) | ✅ |
+| `contract` / `interface` / `library` / `abstract` (継承込み) | ✅ |
+| `function` 全修飾子 (visibility/mutability/virtual/override/modifiers) | ✅ |
+| `constructor` / `fallback` / `receive` | ✅ |
+| `modifier` / `event` (indexed) / `error` | ✅ |
 | `struct` / `enum` | ✅ |
-| 状態変数宣言 | ✅ |
-| 全文 (if/for/while/do/return/break/continue/emit/revert/assembly) | ✅ |
-| 全式 (三項演算子・代入・後置++/--・タプル・named args) | ✅ |
-| 型名 (mapping/function type/配列) | ✅ |
-| エラーリカバリ | 🟡 基本的な同期のみ |
-| **`returns` キーワード未定義により戻り型の解析が壊れる** | 🐛 |
-| `using X for Y` 構文 | ❌ |
-| `unchecked { }` ブロック | ❌ |
-| `try/catch` 文 | ❌ |
-| NatSpec コメント (`///` / `/** */`) | ❌ |
-| テスト | 🟡 主要パスのみ |
+| `using X for Y` / `using X for *` | ✅ |
+| `type T is uint256` (ユーザー定義値型) | ✅ |
+| 状態変数宣言 (immutable/constant) | ✅ |
+| 全文 (if/for/while/do/return/break/continue/emit/revert) | ✅ |
+| `unchecked { }` ブロック | ✅ |
+| `try/catch` 文 | ✅ |
+| `assembly "evmasm" { … }` (本体は rawYul として保存) | ✅ |
+| 全式 (三項演算子・代入・後置++/--・タプル) | ✅ |
+| 呼び出しオプション `f{value: v, gas: g}(args)` | ✅ |
+| スライスアクセス `arr[1:2]` | ✅ |
+| 配列リテラル `[a, b, c]` | ✅ |
+| `delete x` / `type(T)` / `new T(…)` | ✅ |
+| 名前付き引数 `f({key: val})` | ✅ |
+| `address payable` 型名 | ✅ |
+| NatSpec (`///` / `/** */`) トークン保持 | ✅ |
+| エラーリカバリ (パニックモード + `_synchronize`) | ✅ |
+| 型名ヒューリスティック (`_looksLikeTypeName`) | ✅ |
+| テスト (7件通過) | ✅ |
 
 ---
 
@@ -96,14 +103,10 @@
 | `IntType` (int8〜int256, uint8〜uint256) min/max | ✅ |
 | `BoolType` / `AddressType` / `BytesNType` | ✅ |
 | `BytesType` / `StringType` (動的) | ✅ |
-| `ArrayType` (固定長・動的) | ✅ |
-| `MappingType` | ✅ |
-| `TupleType` | ✅ |
-| `FunctionType` (stateMutability 付き) | ✅ |
-| `TypeType` / `ErrorType` (番兵) | ✅ |
-| `isImplicitlyConvertible` / `isExplicitlyConvertible` | ✅ |
-| `commonType` (二項演算の共通型) | ✅ |
-| テスト | ✅ |
+| `ArrayType` (固定長・動的) / `MappingType` / `TupleType` | ✅ |
+| `FunctionType` / `TypeType` / `ErrorType` (番兵) | ✅ |
+| `isImplicitlyConvertible` / `isExplicitlyConvertible` / `commonType` | ✅ |
+| テスト (11件通過) | ✅ |
 | 有理数リテラル型 (`RationalNumberType`) | ❌ |
 | `FixedType` / `UFixedType` (固定小数点) | ❌ |
 
@@ -113,21 +116,17 @@
 
 | 機能 | 状態 |
 |---|---|
-| C3 多重継承線形化 | ✅ |
+| C3 多重継承線形化 (サイクル検出修正済み) | ✅ |
 | スコープチェーン (`Scope` / `Symbol`) | ✅ |
 | コントラクト内メンバの巻き上げ (関数・状態変数・イベント) | ✅ |
 | ローカル変数の宣言と登録 | ✅ |
 | `Identifier` の名前解決と `annotation` 書き込み | ✅ |
-| テスト | 🟡 C3 のみ |
-| **if/while/for/return 文中の Identifier を再帰的にウォークしない** | 🐛 |
+| テスト (4件通過) | ✅ |
+| **if/while/for/return 文中の Identifier を再帰ウォークしない** | 🐛 |
 | 型検査 (BinaryOperation, Literal) | 🟡 最小限 |
 | FunctionCall の型解決 | ❌ |
-| Identifier の型注釈 (sema→types バインディング) | ❌ |
-| override 整合性チェック | ❌ |
-| 可視性チェック | ❌ |
-| `pure`/`view` ルール検証 | ❌ |
-| 未使用変数の警告 | ❌ |
-| 循環 import 検出 | ❌ |
+| override 整合性チェック / 可視性チェック / pure/view ルール | ❌ |
+| 未使用変数の警告 / 循環 import 検出 | ❌ |
 
 ---
 
@@ -135,15 +134,12 @@
 
 | 機能 | 状態 |
 |---|---|
-| 全オペコード (Shanghai + Cancun: TLOAD/TSTORE/MCOPY/BLOBHASH/BLOBBASEFEE/PUSH0) | ✅ |
+| 全オペコード (Shanghai + Cancun: TLOAD/TSTORE/MCOPY/BLOBHASH/PUSH0 等) | ✅ |
 | スタック消費数 / 生成数 / ベースガスコスト | ✅ |
-| `Opcode.fromByte()` / `Opcode.pushForSize()` | ✅ |
-| `Assembler`: `emit` / `push(BigInt)` / `push1` | ✅ |
-| `Assembler`: `label` / `jump` / `jumpi` (2パスラベル解決) | ✅ |
-| `Assembler`: `dup(n)` / `swap(n)` / `add` / `ret` 等の便利メソッド | ✅ |
-| テスト | ✅ |
+| `Assembler`: `emit` / `push(BigInt)` / `label` / `jump` / `jumpi` | ✅ |
+| 2パスラベル解決 | ✅ |
+| テスト (7件通過) | ✅ |
 | バイトコードリンカ (library address placeholder) | ❌ |
-| ガス見積もりユーティリティ | ❌ |
 
 ---
 
@@ -153,15 +149,13 @@
 |---|---|
 | Yul AST 全ノード (sealed class) | ✅ |
 | `YulPrinter` (AST → Yul テキスト) | ✅ |
-| `YulCodeGenerator` — `if` / `for` / `switch` 文 | ✅ |
-| `YulCodeGenerator` — 全組み込みオペコード関数 (`add`, `sload` …) | ✅ |
-| `YulCodeGenerator` — 数値リテラル / bool リテラル | ✅ |
-| テスト | 🟡 |
-| **変数 (`YulIdentifier`) は常に `PUSH0` を返す (スタックスロット未実装)** | 🐛 |
-| **`YulVariableDeclaration` / `YulAssignment` でスタックへのストアなし** | 🐛 |
-| **`YulFunctionDefinition` がスキップされる (ホイスト未実装)** | 🐛 |
-| Yul オプティマイザ (定数畳み込み / DCE / インライン展開) | ❌ |
-| Yul パーサ (`assembly { … }` ブロックのパース) | ❌ |
+| `YulCodeGenerator` — if/for/switch/組み込み関数/リテラル | ✅ |
+| テスト (3件通過) | 🟡 |
+| **`YulIdentifier` が常に `PUSH0` を返す (スタックスロット未実装)** | 🐛 |
+| **`YulVariableDeclaration` / `YulAssignment` でストアなし** | 🐛 |
+| **`YulFunctionDefinition` のホイスト未実装** | 🐛 |
+| Yul パーサ (`assembly { … }` ブロック) | ❌ |
+| Yul オプティマイザ | ❌ |
 
 ---
 
@@ -171,21 +165,15 @@
 |---|---|
 | デプロイメントコード骨格 (codecopy + return) | ✅ |
 | ABI ディスパッチャ骨格 (switch on selector) | ✅ |
-| 関数定義の Yul 関数への変換 | ✅ |
-| `return` 文 → `leave` | ✅ |
-| `if` 文 | ✅ |
-| 二項算術演算子 (`+`, `-`, `*`, `/` 等) | ✅ |
-| **関数セレクタが `hashCode` のプレースホルダ (keccak256 未実装)** | 🐛 |
-| **ABI パラメータデコードが常に `calldataload(4)` を返すだけ** | 🐛 |
-| **複数引数の `calldataload` オフセットが計算されない** | 🐛 |
-| `for` / `while` / `do-while` 文 | ❌ |
-| `WhileStatement` / `ForStatement` のコード生成 | ❌ |
-| `MemberAccess` (状態変数 SLOAD/SSTORE) | ❌ |
-| 構造体 / 配列アクセス | ❌ |
-| `emit` / `revert` 文 | ❌ |
-| コンストラクタ実行 | ❌ |
+| 関数定義 → Yul 関数変換 (`return` → `leave` 含む) | ✅ |
+| `if` 文 / 二項算術演算子 | ✅ |
+| テスト (3件通過) | 🟡 |
+| **関数セレクタが `hashCode` プレースホルダ (keccak256 未実装)** | 🐛 |
+| **ABI パラメータデコードが常に `calldataload(4)` のみ** | 🐛 |
+| for/while/do-while 文 | ❌ |
+| 状態変数 SLOAD/SSTORE | ❌ |
+| `emit` / `revert` / コンストラクタ | ❌ |
 | ABI 戻り値エンコード (MSTORE + RETURN) | ❌ |
-| テスト | 🟡 |
 
 ---
 
@@ -193,23 +181,14 @@
 
 | 機能 | 状態 |
 |---|---|
-| `function` エントリの ABI JSON 生成 | ✅ |
-| `event` エントリの ABI JSON 生成 | ✅ |
-| `error` エントリの ABI JSON 生成 | ✅ |
-| ABI エンコード: uint/int (任意幅) | ✅ |
-| ABI エンコード: bool / address | ✅ |
-| ABI エンコード: bytes1〜bytes32 | ✅ |
-| ABI エンコード: bytes / string (動的) | ✅ |
-| ABI エンコード: T[] / T[N] | ✅ |
+| `function` / `event` / `error` エントリの ABI JSON 生成 | ✅ |
+| ABI エンコード: uint/int/bool/address/bytes1〜32/bytes/string/T[]/T[N] | ✅ |
+| テスト (4件通過) | 🟡 |
 | **`event` の `indexed` フラグが常に `false`** | 🐛 |
-| **固定長配列の ABI 型文字列が `T[TODO]` になる** | 🐛 |
-| **UserDefinedType が `nameParts.last` のみを返す** | 🐛 |
-| ABI エンコード: tuple / struct | ❌ |
+| **固定長配列の ABI 型文字列が `T[TODO]`** | 🐛 |
+| ABI エンコード: tuple/struct | ❌ |
 | ABI デコード | ❌ |
-| ABI エンコード: mapping | ❌ (spec 上は不可だが型判定が必要) |
-| NatSpec (devdoc / userdoc) 生成 | ❌ |
-| メタデータ JSON 生成 | ❌ |
-| テスト | 🟡 |
+| NatSpec (devdoc/userdoc) / メタデータ JSON | ❌ |
 
 ---
 
@@ -217,14 +196,13 @@
 
 | 機能 | 状態 |
 |---|---|
-| `CompilerStack.addSource` / `compile` のパイプライン接続 | ✅ |
+| `CompilerStack.addSource` / `compile` パイプライン | ✅ |
 | `CompilationResult` / `ContractOutput` データ構造 | ✅ |
 | standard-JSON 入出力インターフェース | ✅ |
-| **`deployedBytecode` が常に空 (ランタイムバイトコード分離未実装)** | 🐛 |
-| import 解決 (複数ファイルのつなぎ) | ❌ |
-| remapping 適用 | ❌ |
-| `settings.optimizer` / 最適化フラグ | ❌ |
-| テスト | 🟡 |
+| テスト (3件通過) | ✅ |
+| **`deployedBytecode` が常に空 (ランタイム/デプロイ分離未実装)** | 🐛 |
+| import 解決 (複数ファイル) / remapping 適用 | ❌ |
+| `settings.optimizer` フラグ | ❌ |
 
 ---
 
@@ -232,41 +210,70 @@
 
 | 機能 | 状態 |
 |---|---|
-| `--bin` / `--abi` / `--ir` フラグ | ✅ |
-| `--standard-json` (stdin→stdout) | ✅ |
-| `--version` / `--help` | ✅ |
+| `--bin` / `--abi` / `--ir` / `--standard-json` / `--version` / `--help` | ✅ |
 | ファイル複数指定 | ✅ |
-| `dart run sol_cli:solc` でのエントリポイント | ✅ |
-| `--optimize` / `--optimize-runs` | ❌ |
-| `--remappings` | ❌ |
-| `--base-path` / `--include-path` | ❌ |
+| `dart run sol_cli:solc` エントリポイント | ✅ |
+| `--optimize` / `--remappings` / `--base-path` / `--include-path` | ❌ |
 | テスト | ❌ |
 
 ---
 
-## 既知の重大バグ（修正しないと動かない）
+## 解決済みバグ
 
-| # | 場所 | 内容 |
-|---|---|---|
-| B-1 | `sol_lexer/token_kind.dart` | `TokenKind.kReturns` が enum に存在しない。`sol_parser` が参照しているため関数の戻り型が全て解析失敗になる |
-| B-2 | `sol_ast/statements.dart` | `VariableDeclaration` が `declarations.dart` と重複定義。`sol_ast.dart` でエクスポートするとコンパイルエラー |
-| B-3 | `sol_ast/type_names.dart` | `Expression` / `Parameter` が前方参照として重複定義されている |
-| B-4 | `sol_yul/yul_codegen.dart` | `YulIdentifier` が常に `PUSH0` を返す。変数のスタックスロット管理が未実装なため正しいバイトコードを生成できない |
-| B-5 | `sol_codegen/ir_generator.dart` | 関数セレクタが `hashCode` ベースのプレースホルダ。実際のkeccak256ハッシュライブラリの追加が必要 |
-| B-6 | `sol_codegen/ir_generator.dart` | `calldataload` のオフセット計算が固定値 `4`。複数引数は正しく読めない |
+| # | 場所 | 内容 | 修正日 |
+|---|---|---|---|
+| B-1 | `sol_lexer/token_kind.dart` | `TokenKind.kReturns` が未定義 → 戻り型の解析が常に失敗 | 2026-06-17 |
+| B-2 | `sol_ast/statements.dart` | `VariableDeclaration` が `declarations.dart` と重複定義 | 2026-06-17 |
+| B-3 | `sol_ast/type_names.dart` | `Expression` / `Parameter` の前方参照重複定義 | 2026-06-17 |
+| B-7 | `sol_ast/ast_node.dart` | `AstVisitor` stub と `visitor.dart` の二重定義による ambiguous_export | 2026-06-17 |
+| B-8 | `sol_lexer/lexer.dart` | `_scanString` が開始引用符を終了引用符と誤認 → 文字列が空になる | 2026-06-17 |
+| B-9 | `sol_lexer/lexer.dart` | `_tok()` が `lexeme` を設定しない → 演算子 lexeme が常に `''` | 2026-06-17 |
+| B-10 | `sol_support/source_location.dart` | `LineColumn` に `==`/`hashCode` なし → テスト比較が常に失敗 | 2026-06-17 |
+| B-11 | `sol_support/import_remapping.dart` | コンテキスト固有 remapping がグローバルに負ける | 2026-06-17 |
+| B-12 | `sol_sema/c3_lineariser.dart` | サイクルで `C3LinearisationError` でなく無限再帰 / StackOverflow | 2026-06-17 |
+| B-13 | `sol_codegen/ir_generator.dart` | `"$operator$"` の文字列補間エラー | 2026-06-17 |
 
 ---
 
-## 推奨修正順序（第1マイルストーン: Adder.sol をバイトコードまで通す）
+## 残存バグ（未修正）
+
+| # | 場所 | 内容 |
+|---|---|---|
+| B-4 | `sol_yul/yul_codegen.dart` | `YulIdentifier` が常に `PUSH0` を返す (スタックスロット管理未実装) |
+| B-5 | `sol_codegen/ir_generator.dart` | 関数セレクタが `hashCode` プレースホルダ (keccak256 未実装) |
+| B-6 | `sol_codegen/ir_generator.dart` | `calldataload` オフセット固定値 `4` (複数引数で不正) |
+
+---
+
+## テスト通過状況 (2026-06-17 現在)
+
+| パッケージ | テスト数 | 状態 |
+|---|---|---|
+| sol_support | 8 | ✅ 全通過 |
+| sol_lexer | 13 | ✅ 全通過 |
+| sol_ast | 2 | ✅ 全通過 |
+| sol_types | 11 | ✅ 全通過 |
+| sol_parser | 7 | ✅ 全通過 |
+| sol_sema | 4 | ✅ 全通過 |
+| sol_abi | 4 | ✅ 全通過 |
+| sol_codegen | 3 | ✅ 全通過 |
+| sol_evm | 7 | ✅ 全通過 |
+| sol_yul | 3 | ✅ 全通過 |
+| sol_driver | 3 | ✅ 全通過 |
+| **合計** | **65** | **✅ 全通過** |
+
+---
+
+## 第1マイルストーン: Adder.sol をバイトコードまで通す
+
+残りタスク:
 
 ```
-Step 1: B-2, B-3 を修正 → sol_ast をコンパイル可能にする
-Step 2: B-1 を修正     → sol_parser が returns を認識できるようにする
-Step 3: B-4 を修正     → Yul 変数のスタックスロット管理を実装
-Step 4: B-5 を修正     → keccak256 パッケージ (dart pub add pointycastle 等) でセレクタ計算
-Step 5: B-6 を修正     → ABI calldataload オフセット計算
-Step 6: ABI 戻り値エンコード (MSTORE + RETURN) を sol_codegen に追加
-Step 7: melos bootstrap → melos run test で全テスト通過確認
+Step 1 (残存): B-4 修正 — Yul 変数のスタックスロット管理を実装
+Step 2 (残存): B-5 修正 — keccak256 パッケージ (pointycastle 等) でセレクタ計算
+Step 3 (残存): B-6 修正 — ABI calldataload オフセット計算
+Step 4 (残存): ABI 戻り値エンコード (MSTORE + RETURN) を sol_codegen に追加
+Step 5 (残存): sol_evm Assembler で生成したバイトコードの連結・検証
 ```
 
 ---
@@ -281,8 +288,7 @@ Step 7: melos bootstrap → melos run test で全テスト通過確認
 | 中 | `sol_sema`: 型検査の全式対応 (FunctionCall, MemberAccess …) |
 | 中 | `sol_codegen`: emit / revert / コンストラクタ |
 | 中 | `sol_abi`: tuple エンコード / ABI デコード |
-| 中 | `sol_parser`: `using X for Y` / `unchecked` / `try/catch` |
 | 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) |
-| 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン) |
+| 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) |
 | 低 | `sol_abi`: NatSpec / メタデータ JSON |
 | 低 | `sol_cli`: `--remappings` / `--base-path` |
