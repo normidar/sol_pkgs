@@ -1,0 +1,13 @@
+name: sol_support
+description: >
+  Foundation library for the sol_pkgs Solidity compiler.
+  Provides source locations, diagnostic collection, and import remapping.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dev_dependencies:
+  lints: ^4.0.0
+  test: ^1.25.0

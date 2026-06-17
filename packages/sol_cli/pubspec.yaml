@@ -1,0 +1,18 @@
+name: sol_cli
+description: >
+  Command-line interface for the sol_pkgs Solidity compiler.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  sol_support:
+    path: ../sol_support
+  sol_driver:
+    path: ../sol_driver
+  args: ^2.5.0
+
+dev_dependencies:
+  lints: ^4.0.0
