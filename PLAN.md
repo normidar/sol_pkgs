@@ -112,19 +112,26 @@
 
 ---
 
-### `sol_sema` 🟡 完成度: 低〜中
+### `sol_sema` ✅ 完成度: 中〜高
 
 | 機能 | 状態 |
 |---|---|
 | C3 多重継承線形化 (サイクル検出修正済み) | ✅ |
 | スコープチェーン (`Scope` / `Symbol`) | ✅ |
-| コントラクト内メンバの巻き上げ (関数・状態変数・イベント) | ✅ |
+| コントラクト内全メンバの巻き上げ (関数・状態変数・イベント・エラー・struct・enum・modifier・UDVT) | ✅ |
 | ローカル変数の宣言と登録 | ✅ |
+| 名前付き返り値パラメータのスコープ登録 | ✅ |
 | `Identifier` の名前解決と `annotation` 書き込み | ✅ |
-| テスト (4件通過) | ✅ |
-| **if/while/for/return 文中の Identifier を再帰ウォークしない** | 🐛 |
-| 型検査 (BinaryOperation, Literal) | 🟡 最小限 |
+| 組み込み名 (msg/block/tx/this/super/require 等) の偽陽性抑制 | ✅ |
+| 全文を再帰ウォーク (if/while/for/do-while/try-catch/return/emit/revert/unchecked) | ✅ |
+| 全式を再帰ウォーク (binary/unary/assign/call/member/index/conditional/tuple) | ✅ |
+| `Modifier` 本体の名前解決 | ✅ |
+| `TypeChecker.check(SourceFile)` エントリポイント | ✅ |
+| 型検査: Literal/BinaryOp/UnaryOp/Assignment/Conditional + 全文 | ✅ |
+| `visitVariableDeclarationStatement`: 宣言変数の型アノテーション | ✅ |
+| テスト (28件通過) | ✅ |
 | FunctionCall の型解決 | ❌ |
+| MemberAccess の型解決 | ❌ |
 | override 整合性チェック / 可視性チェック / pure/view ルール | ❌ |
 | 未使用変数の警告 / 循環 import 検出 | ❌ |
 
@@ -137,24 +144,30 @@
 | 全オペコード (Shanghai + Cancun: TLOAD/TSTORE/MCOPY/BLOBHASH/PUSH0 等) | ✅ |
 | スタック消費数 / 生成数 / ベースガスコスト | ✅ |
 | `Assembler`: `emit` / `push(BigInt)` / `label` / `jump` / `jumpi` | ✅ |
-| 2パスラベル解決 | ✅ |
+| `pushLabel(name)` — ラベルオフセットをスタック値として PUSH2 生成 | ✅ |
+| 2パスラベル解決 (`PushLabelInstruction` 対応済み) | ✅ |
 | テスト (7件通過) | ✅ |
 | バイトコードリンカ (library address placeholder) | ❌ |
 
 ---
 
-### `sol_yul` 🟡 完成度: 中
+### `sol_yul` ✅ 完成度: 高
 
 | 機能 | 状態 |
 |---|---|
 | Yul AST 全ノード (sealed class) | ✅ |
 | `YulPrinter` (AST → Yul テキスト) | ✅ |
 | `YulCodeGenerator` — if/for/switch/組み込み関数/リテラル | ✅ |
-| テスト (3件通過) | 🟡 |
-| **`YulIdentifier` が常に `PUSH0` を返す (スタックスロット未実装)** | 🐛 |
-| **`YulVariableDeclaration` / `YulAssignment` でストアなし** | 🐛 |
-| **`YulFunctionDefinition` のホイスト未実装** | 🐛 |
+| `_Frame` クラス — EVM スタックスロットを名前付きで管理 | ✅ |
+| `YulVariableDeclaration` — 値を push し名前スロットとして登録 | ✅ |
+| `YulIdentifier` — DUP(depth) で変数参照 | ✅ |
+| `YulAssignment` — SWAP(d)+POP で指定スロットを上書き | ✅ |
+| `YulFunctionDefinition` — ホイスト、フレーム設定、leave 生成 (M=0,1) | ✅ |
+| `YulBreak` / `YulContinue` — ループラベルスタック | ✅ |
+| 組み込み void 関数 (mstore/sstore/log*/pop 等) の POP 抑制 | ✅ |
+| テスト (17件通過) | ✅ |
 | Yul パーサ (`assembly { … }` ブロック) | ❌ |
+| 複数返り値関数 (M>1) のホイスト | ❌ |
 | Yul オプティマイザ | ❌ |
 
 ---
@@ -235,11 +248,16 @@
 
 ---
 
+## 解決済みバグ（B-4 追加）
+
+| # | 場所 | 内容 | 修正日 |
+|---|---|---|---|
+| B-4 | `sol_yul/yul_codegen.dart` | `YulIdentifier` が常に `PUSH0` — `_Frame` + DUP(depth) で修正 | 2026-06-17 |
+
 ## 残存バグ（未修正）
 
 | # | 場所 | 内容 |
 |---|---|---|
-| B-4 | `sol_yul/yul_codegen.dart` | `YulIdentifier` が常に `PUSH0` を返す (スタックスロット管理未実装) |
 | B-5 | `sol_codegen/ir_generator.dart` | 関数セレクタが `hashCode` プレースホルダ (keccak256 未実装) |
 | B-6 | `sol_codegen/ir_generator.dart` | `calldataload` オフセット固定値 `4` (複数引数で不正) |
 
@@ -254,13 +272,13 @@
 | sol_ast | 2 | ✅ 全通過 |
 | sol_types | 11 | ✅ 全通過 |
 | sol_parser | 7 | ✅ 全通過 |
-| sol_sema | 4 | ✅ 全通過 |
+| sol_sema | 28 | ✅ 全通過 |
 | sol_abi | 4 | ✅ 全通過 |
 | sol_codegen | 3 | ✅ 全通過 |
 | sol_evm | 7 | ✅ 全通過 |
-| sol_yul | 3 | ✅ 全通過 |
+| sol_yul | 17 | ✅ 全通過 |
 | sol_driver | 3 | ✅ 全通過 |
-| **合計** | **65** | **✅ 全通過** |
+| **合計** | **103** | **✅ 全通過** |
 
 ---
 
@@ -269,9 +287,9 @@
 残りタスク:
 
 ```
-Step 1 (残存): B-4 修正 — Yul 変数のスタックスロット管理を実装
+Step 1 (完了): B-4 修正 — Yul 変数のスタックスロット管理 (_Frame + DUP/SWAP)
 Step 2 (残存): B-5 修正 — keccak256 パッケージ (pointycastle 等) でセレクタ計算
-Step 3 (残存): B-6 修正 — ABI calldataload オフセット計算
+Step 3 (残存): B-6 修正 — ABI calldataload オフセット計算 (引数ごとに +32)
 Step 4 (残存): ABI 戻り値エンコード (MSTORE + RETURN) を sol_codegen に追加
 Step 5 (残存): sol_evm Assembler で生成したバイトコードの連結・検証
 ```
@@ -282,7 +300,7 @@ Step 5 (残存): sol_evm Assembler で生成したバイトコードの連結・
 
 | 優先度 | タスク |
 |---|---|
-| 高 | `sol_sema`: if/while/for 文中の Identifier を再帰ウォーク |
+| 高 | `sol_sema`: FunctionCall / MemberAccess の型解決 |
 | 高 | `sol_codegen`: for/while 文のコード生成 |
 | 高 | `sol_codegen`: 状態変数 SLOAD/SSTORE |
 | 中 | `sol_sema`: 型検査の全式対応 (FunctionCall, MemberAccess …) |
