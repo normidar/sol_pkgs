@@ -1,4 +1,3 @@
-import 'package:sol_support/sol_support.dart';
 import 'ast_node.dart';
 import 'enums.dart';
 import 'visitor.dart';
