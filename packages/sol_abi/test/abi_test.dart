@@ -42,6 +42,102 @@ void main() {
       expect(abi.first['stateMutability'], 'pure');
       expect((abi.first['inputs'] as List).length, 2);
     });
+
+    test('marks indexed event parameters', () {
+      final contract = ContractDefinition(
+        loc,
+        ContractKind.contract,
+        'Token',
+        [],
+        [
+          EventDefinition(
+            loc,
+            'Transfer',
+            [
+              Parameter(loc, ElementaryTypeName(loc, 'address'), 'from', null,
+                  indexed: true),
+              Parameter(loc, ElementaryTypeName(loc, 'address'), 'to', null,
+                  indexed: true),
+              Parameter(
+                  loc,
+                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                  'value',
+                  null),
+            ],
+            false,
+          ),
+        ],
+      );
+
+      final abi = AbiGenerator().generate(contract);
+      final inputs = abi.first['inputs'] as List;
+      expect(inputs[0]['indexed'], isTrue);
+      expect(inputs[1]['indexed'], isTrue);
+      expect(inputs[2]['indexed'], isFalse);
+    });
+
+    test('renders fixed-length array types', () {
+      final contract = ContractDefinition(
+        loc,
+        ContractKind.contract,
+        'C',
+        [],
+        [
+          FunctionDefinition(
+            location: loc,
+            kind: FunctionKind.function,
+            name: 'f',
+            parameters: [
+              Parameter(
+                loc,
+                ArrayTypeName(
+                  loc,
+                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                  Literal(loc, LiteralKind.number, '3', null),
+                ),
+                'xs',
+                DataLocation.memory,
+              ),
+            ],
+            returnParameters: [],
+            visibility: Visibility.public,
+            stateMutability: StateMutability.pure,
+            isVirtual: false,
+            overrideSpecifier: [],
+            modifiers: [],
+            body: null,
+          ),
+        ],
+      );
+
+      final abi = AbiGenerator().generate(contract);
+      expect((abi.first['inputs'] as List).first['type'], 'uint256[3]');
+    });
+  });
+
+  group('abi signatures', () {
+    test('computes canonical function selector', () {
+      final fn = FunctionDefinition(
+        location: loc,
+        kind: FunctionKind.function,
+        name: 'transfer',
+        parameters: [
+          Parameter(loc, ElementaryTypeName(loc, 'address'), 'to', null),
+          Parameter(loc, ElementaryTypeName(loc, 'uint', intWidth: 0), 'amount',
+              null),
+        ],
+        returnParameters: [],
+        visibility: Visibility.external,
+        stateMutability: StateMutability.nonpayable,
+        isVirtual: false,
+        overrideSpecifier: [],
+        modifiers: [],
+        body: null,
+      );
+      // `uint` must canonicalise to `uint256` → transfer(address,uint256).
+      expect(functionSignature(fn), 'transfer(address,uint256)');
+      expect(functionSelectorHex(fn), '0xa9059cbb');
+    });
   });
 
   group('AbiEncoder', () {

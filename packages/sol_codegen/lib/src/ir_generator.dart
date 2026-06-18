@@ -1,3 +1,4 @@
+import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_support/sol_support.dart';
 import 'package:sol_yul/sol_yul.dart';
@@ -16,6 +17,9 @@ class IRGenerator {
 
   final DiagnosticCollector _diagnostics;
   int _tmpCounter = 0;
+
+  /// Yul slot names of the return variables of the function being lowered.
+  final List<String> _returnSlots = [];
 
   YulObject generateContract(ContractDefinition contract) {
     final runtimeBlock = _generateRuntimeCode(contract);
@@ -99,25 +103,41 @@ class IRGenerator {
         .where((fn) => fn.name != null)
         .toList();
 
-    // switch calldataload(0)
+    // switch shr(224, calldataload(0))  — the 4-byte function selector.
     final cases = publicFns.map((fn) {
-      final selector = _functionSelector(fn);
+      final selector = functionSelectorHex(fn);
+      final args = [
+        for (var i = 0; i < fn.parameters.length; i++)
+          _decodeParam(fn.parameters[i], i),
+      ];
+      final call = YulFunctionCall('fun_${fn.name}', args);
+      final returnCount = fn.returnParameters.length;
+
+      final body = <YulStatement>[];
+      if (returnCount == 0) {
+        body.add(YulExpressionStatement(call));
+        body.add(_abiReturn(0));
+      } else {
+        // Capture the return value(s), ABI-encode them into memory at 0x00,
+        // then RETURN the head region (one 32-byte word per static value).
+        final captures = [
+          for (var i = 0; i < returnCount; i++) 'abi_ret_${fn.name}_$i',
+        ];
+        body.add(YulVariableDeclaration(captures, call));
+        for (var i = 0; i < returnCount; i++) {
+          body.add(YulExpressionStatement(
+            YulFunctionCall('mstore', [
+              YulLiteral('${i * 32}', YulLiteralKind.number),
+              YulIdentifier(captures[i]),
+            ]),
+          ));
+        }
+        body.add(_abiReturn(returnCount * 32));
+      }
+
       return YulCase(
         YulLiteral(selector, YulLiteralKind.number),
-        YulBlock([
-          YulExpressionStatement(
-            YulFunctionCall(
-              'fun_${fn.name}',
-              fn.parameters.map((p) => _decodeParam(p)).toList(),
-            ),
-          ),
-          YulExpressionStatement(
-            YulFunctionCall('return', [
-              YulLiteral('0', YulLiteralKind.number),
-              YulLiteral('32', YulLiteralKind.number),
-            ]),
-          ),
-        ]),
+        YulBlock(body),
       );
     }).toList();
 
@@ -134,15 +154,33 @@ class IRGenerator {
   }
 
   YulFunctionDefinition _generateFunction(FunctionDefinition fn) {
-    final params = fn.parameters.map((p) => 'param_${p.name ?? _tmp()}').toList();
-    final rets = fn.returnParameters.map((p) => 'ret_${p.name ?? _tmp()}').toList();
+    // Parameters are referenced from the body as plain identifiers, so their
+    // Yul slot names must match what [_generateExpression] produces for an
+    // [Identifier] (`var_<name>`). Unnamed/return slots fall back to indices.
+    final params = [
+      for (var i = 0; i < fn.parameters.length; i++)
+        _slotName(fn.parameters[i].name, 'param_$i'),
+    ];
+    final rets = [
+      for (var i = 0; i < fn.returnParameters.length; i++)
+        _slotName(fn.returnParameters[i].name, 'ret_$i'),
+    ];
 
-    final body = fn.body != null
-        ? _generateBlock(fn.body!)
-        : YulBlock([]);
+    final savedReturnSlots = List<String>.from(_returnSlots);
+    _returnSlots
+      ..clear()
+      ..addAll(rets);
+    final body = fn.body != null ? _generateBlock(fn.body!) : YulBlock([]);
+    _returnSlots
+      ..clear()
+      ..addAll(savedReturnSlots);
 
     return YulFunctionDefinition('fun_${fn.name}', params, rets, body);
   }
+
+  /// Slot name for a (possibly named) parameter/return variable.
+  static String _slotName(String? name, String fallback) =>
+      name != null ? 'var_$name' : fallback;
 
   YulBlock _generateBlock(Block block) {
     return YulBlock(block.statements.map(_generateStatement).toList());
@@ -151,10 +189,28 @@ class IRGenerator {
   YulStatement _generateStatement(Statement stmt) {
     switch (stmt) {
       case ReturnStatement(:final expression):
-        if (expression == null) return YulLeave();
+        if (expression == null || _returnSlots.isEmpty) return YulLeave();
+        // `return (a, b)` → assign each declared return slot in order.
+        if (expression is TupleExpression && _returnSlots.length > 1) {
+          final stmts = <YulStatement>[];
+          final n = expression.components.length < _returnSlots.length
+              ? expression.components.length
+              : _returnSlots.length;
+          for (var i = 0; i < n; i++) {
+            final component = expression.components[i];
+            if (component != null) {
+              stmts.add(YulAssignment(
+                [_returnSlots[i]],
+                _generateExpression(component),
+              ));
+            }
+          }
+          stmts.add(YulLeave());
+          return YulBlock(stmts);
+        }
         return YulBlock([
           YulAssignment(
-            ['ret_0'],
+            [_returnSlots.first],
             _generateExpression(expression),
           ),
           YulLeave(),
@@ -237,8 +293,8 @@ class IRGenerator {
           arguments.map(_generateExpression).toList(),
         );
 
-      case Assignment(:final leftHandSide, :final rightHandSide):
-        // Side-effectful; wrap in a block expression via a temp.
+      case Assignment(:final rightHandSide):
+        // Side-effectful; only the assigned value is propagated for now.
         return _generateExpression(rightHandSide);
 
       default:
@@ -270,19 +326,22 @@ class IRGenerator {
 
   // ── ABI helpers ───────────────────────────────────────────────────────────
 
-  /// Keccak256 of `"name(type,type,…)"` truncated to 4 bytes → hex.
-  /// Real implementation needs a keccak library; this is a placeholder.
-  String _functionSelector(FunctionDefinition fn) {
-    // TODO: compute real keccak256 selector.
-    final sig = '${fn.name}(${fn.parameters.map((p) => p.typeName.toString()).join(',')})';
-    final hash = sig.hashCode & 0xFFFFFFFF;
-    return '0x${hash.toRadixString(16).padLeft(8, '0')}';
-  }
+  /// `return(0, size)` — hands back the ABI-encoded head region.
+  YulStatement _abiReturn(int size) => YulExpressionStatement(
+        YulFunctionCall('return', [
+          YulLiteral('0', YulLiteralKind.number),
+          YulLiteral('$size', YulLiteralKind.number),
+        ]),
+      );
 
-  YulExpression _decodeParam(Parameter p) {
-    // TODO: proper ABI decoding for complex types.
+  /// Decodes the [index]-th statically-encoded argument.
+  ///
+  /// Each value type occupies one 32-byte head word; argument `i` lives at
+  /// `calldataload(4 + i*32)` (4 = selector). Dynamic types (string/bytes/
+  /// dynamic arrays) need offset+length decoding and are not yet handled.
+  YulExpression _decodeParam(Parameter p, int index) {
     return YulFunctionCall('calldataload', [
-      YulLiteral('4', YulLiteralKind.number),
+      YulLiteral('${4 + index * 32}', YulLiteralKind.number),
     ]);
   }
 

@@ -49,10 +49,43 @@ class YulCodeGenerator {
   _FunctionContext? _currentFunction;
   int _labelCounter = 0;
 
+  /// The name and byte size of the embedded deployed (runtime) sub-object,
+  /// used to resolve `dataoffset(...)` / `datasize(...)` in creation code.
+  String? _deployedName;
+  int _deployedSize = 0;
+
+  /// Generates the **creation** bytecode for [obj].
+  ///
+  /// When [obj] has a deployed sub-object (the runtime code), it is compiled
+  /// separately and concatenated after the creation code; `dataoffset` /
+  /// `datasize` references in the creation code resolve to its location/size.
   Uint8List generate(YulObject obj) {
+    if (obj.subObjects.isNotEmpty) {
+      final deployed = obj.subObjects.first;
+      final runtimeBytes = YulCodeGenerator().generate(deployed);
+      _deployedName = deployed.name;
+      _deployedSize = runtimeBytes.length;
+
+      _generateBlock(obj.code, hoistFunctions: true);
+      final creation = _asm.assemble();
+
+      final out = Uint8List(creation.length + runtimeBytes.length);
+      out.setRange(0, creation.length, creation);
+      out.setRange(creation.length, out.length, runtimeBytes);
+      return out;
+    }
     _generateBlock(obj.code, hoistFunctions: true);
     return _asm.assemble();
   }
+
+  /// Generates only the **deployed** (runtime) bytecode for [obj].
+  ///
+  /// This is the code that ends up stored on-chain (no constructor / deploy
+  /// wrapper). Returns the sub-object's bytecode, or [obj]'s own code if it has
+  /// no sub-object.
+  Uint8List generateDeployed(YulObject obj) => obj.subObjects.isNotEmpty
+      ? YulCodeGenerator().generate(obj.subObjects.first)
+      : YulCodeGenerator().generate(obj);
 
   // ── Block generation ────────────────────────────────────────────────────────
 
@@ -243,6 +276,18 @@ class YulCodeGenerator {
   }
 
   void _generateCall(String name, List<YulExpression> arguments) {
+    // Object-data references resolve to compile-time constants, not opcodes.
+    if (name == 'dataoffset') {
+      _asm.pushDeployedOffset();
+      _frame.push();
+      return;
+    }
+    if (name == 'datasize') {
+      _asm.push(BigInt.from(_dataSize(arguments)));
+      _frame.push();
+      return;
+    }
+
     final builtin = _builtinOpcodes[name];
     if (builtin != null) {
       // Push args right-to-left so arg[0] is on top.
@@ -406,6 +451,24 @@ class YulCodeGenerator {
 
   String _freshLabel(String prefix) => '${prefix}_${_labelCounter++}';
 
+  /// Size in bytes of the data object named by [arguments] (a single string
+  /// literal). Only the embedded deployed sub-object is currently known.
+  int _dataSize(List<YulExpression> arguments) {
+    if (arguments.length == 1) {
+      final arg = arguments.first;
+      // String-literal values keep their surrounding quotes for the printer.
+      if (arg is YulLiteral && _unquote(arg.value) == _deployedName) {
+        return _deployedSize;
+      }
+    }
+    return _deployedSize;
+  }
+
+  static String _unquote(String s) =>
+      (s.length >= 2 && s.startsWith('"') && s.endsWith('"'))
+          ? s.substring(1, s.length - 1)
+          : s;
+
   // ── Builtin opcode tables ────────────────────────────────────────────────────
 
   static const _builtinOpcodes = {
@@ -476,8 +539,11 @@ class YulCodeGenerator {
   };
 
   /// Builtins that do not push a result onto the stack.
+  ///
+  /// Includes the terminating instructions (`return`, `stop`, …): they halt
+  /// execution and leave nothing, so no result POP must follow them.
   static const _builtinVoidOpcodes = {
-    'stop', 'revert', 'invalid', 'selfdestruct',
+    'stop', 'return', 'revert', 'invalid', 'selfdestruct',
     'mstore', 'mstore8', 'sstore',
     'calldatacopy', 'codecopy', 'returndatacopy', 'extcodecopy',
     'log0', 'log1', 'log2', 'log3', 'log4',

@@ -1,4 +1,3 @@
-import 'dart:typed_data';
 import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_codegen/sol_codegen.dart';
@@ -87,12 +86,13 @@ class CompilerStack {
       final yulObj = IRGenerator(_diagnostics).generateContract(contract);
       final yulIr = YulPrinter().print(yulObj);
       final bytecode = YulCodeGenerator().generate(yulObj);
+      final deployedBytecode = YulCodeGenerator().generateDeployed(yulObj);
       final abi = AbiGenerator().generate(contract);
 
       return ContractOutput(
         name: contract.name,
         bytecode: bytecode,
-        deployedBytecode: Uint8List(0), // TODO: separate runtime bytecode
+        deployedBytecode: deployedBytecode,
         abi: abi,
         yulIr: yulIr,
       );

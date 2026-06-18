@@ -33,6 +33,14 @@ class PushLabelInstruction extends Instruction {
   final String name;
 }
 
+/// Pushes the byte-offset at which the appended deployed (runtime) code begins.
+///
+/// Resolves to the total length of the creation code, since the runtime code is
+/// concatenated immediately after it. Used to lower Yul's `dataoffset(...)`.
+class PushDeployedOffsetInstruction extends Instruction {
+  const PushDeployedOffsetInstruction();
+}
+
 /// Linear assembler that resolves labels in two passes and produces bytecode.
 class Assembler {
   final List<Instruction> _instructions = [];
@@ -59,6 +67,11 @@ class Assembler {
   /// Pushes the byte offset of [name] onto the stack (for use as a return address).
   void pushLabel(String name) =>
       _instructions.add(PushLabelInstruction(name));
+
+  /// Pushes the offset where the appended runtime code begins
+  /// (= total creation-code length). Lowers Yul's `dataoffset(...)`.
+  void pushDeployedOffset() =>
+      _instructions.add(const PushDeployedOffsetInstruction());
 
   // Convenience wrappers for common sequences
   void add() => emit(Opcode.ADD);
@@ -97,8 +110,14 @@ class Assembler {
           offset += 3; // PUSH2 target + JUMP/JUMPI
         case PushLabelInstruction():
           offset += 3; // PUSH2 label-offset
+        case PushDeployedOffsetInstruction():
+          offset += 3; // PUSH2 deployed-offset
       }
     }
+
+    // After pass 1 the running offset equals the total creation-code length,
+    // which is exactly where the appended runtime code will begin.
+    final deployedOffset = offset;
 
     // Pass 2: emit bytes.
     final out = BytesBuilder();
@@ -124,6 +143,10 @@ class Assembler {
           out.addByte(Opcode.PUSH2.byte);
           out.addByte((target >> 8) & 0xFF);
           out.addByte(target & 0xFF);
+        case PushDeployedOffsetInstruction():
+          out.addByte(Opcode.PUSH2.byte);
+          out.addByte((deployedOffset >> 8) & 0xFF);
+          out.addByte(deployedOffset & 0xFF);
       }
     }
     return out.toBytes();

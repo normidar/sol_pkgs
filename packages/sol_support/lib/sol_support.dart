@@ -5,3 +5,4 @@ export 'src/source_location.dart';
 export 'src/source_unit.dart';
 export 'src/diagnostic.dart';
 export 'src/import_remapping.dart';
+export 'src/keccak.dart';
