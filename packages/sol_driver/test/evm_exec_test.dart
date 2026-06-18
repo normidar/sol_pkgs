@@ -63,14 +63,36 @@ class MiniEvm {
         case 0x04: // DIV
           final a = pop(); final b = pop();
           push(b == BigInt.zero ? BigInt.zero : a ~/ b); pc++;
+        case 0x05: // SDIV
+          final a = _toSigned(pop()); final b = _toSigned(pop());
+          push(b == BigInt.zero ? BigInt.zero : a ~/ b); pc++;
         case 0x06: // MOD
           final a = pop(); final b = pop();
           push(b == BigInt.zero ? BigInt.zero : a % b); pc++;
+        case 0x07: // SMOD
+          final a = _toSigned(pop()); final b = _toSigned(pop());
+          push(b == BigInt.zero ? BigInt.zero : a.remainder(b)); pc++;
         case 0x0a: // EXP
           final a = pop(); final b = pop();
           push(a.modPow(b, BigInt.one << 256)); pc++;
+        case 0x0b: // SIGNEXTEND
+          final b = pop(); final x = pop();
+          if (b >= BigInt.from(32)) {
+            push(x);
+          } else {
+            final bit = b.toInt() * 8 + 7;
+            final mask = (BigInt.one << (bit + 1)) - BigInt.one;
+            push(((x >> bit) & BigInt.one) == BigInt.one ? x | ~mask : x & mask);
+          }
+          pc++;
         case 0x10: final a = pop(); final b = pop(); push(a < b ? BigInt.one : BigInt.zero); pc++; // LT
         case 0x11: final a = pop(); final b = pop(); push(a > b ? BigInt.one : BigInt.zero); pc++; // GT
+        case 0x12: // SLT
+          final a = _toSigned(pop()); final b = _toSigned(pop());
+          push(a < b ? BigInt.one : BigInt.zero); pc++;
+        case 0x13: // SGT
+          final a = _toSigned(pop()); final b = _toSigned(pop());
+          push(a > b ? BigInt.one : BigInt.zero); pc++;
         case 0x14: push(pop() == pop() ? BigInt.one : BigInt.zero); pc++; // EQ
         case 0x15: push(pop() == BigInt.zero ? BigInt.one : BigInt.zero); pc++; // ISZERO
         case 0x16: push(pop() & pop()); pc++; // AND
@@ -83,6 +105,14 @@ class MiniEvm {
         case 0x1c: // SHR(shift, value)
           final shift = pop(); final value = pop();
           push(shift >= BigInt.from(256) ? BigInt.zero : value >> shift.toInt()); pc++;
+        case 0x1d: // SAR(shift, value)
+          final shift = pop(); final value = _toSigned(pop());
+          if (shift >= BigInt.from(256)) {
+            push(value < BigInt.zero ? _mask : BigInt.zero);
+          } else {
+            push(value >> shift.toInt());
+          }
+          pc++;
         case 0x35: push(loadWord(calldataByte, pop().toInt())); pc++; // CALLDATALOAD
         case 0x50: pop(); pc++; // POP
         case 0x51: push(loadWord(memByte, pop().toInt())); pc++; // MLOAD
@@ -134,9 +164,16 @@ class MiniEvm {
     if (!jumpdests.contains(d)) throw StateError('Invalid jump destination $d');
     return d;
   }
+
+  /// Interprets a masked 256-bit word as a two's-complement signed integer.
+  static BigInt _toSigned(BigInt v) =>
+      (v & (BigInt.one << 255)) != BigInt.zero ? v - (BigInt.one << 256) : v;
 }
 
-Uint8List _calldata(String signature, List<int> args) {
+Uint8List _calldata(String signature, List<int> args) =>
+    _calldataBig(signature, args.map(BigInt.from).toList());
+
+Uint8List _calldataBig(String signature, List<BigInt> args) {
   final sel = selectorHex(signature).substring(2);
   final out = BytesBuilder();
   for (var i = 0; i < 4; i++) {
@@ -144,7 +181,7 @@ Uint8List _calldata(String signature, List<int> args) {
   }
   for (final a in args) {
     final word = Uint8List(32);
-    var v = BigInt.from(a);
+    var v = a;
     for (var i = 31; i >= 0; i--) {
       word[i] = (v & BigInt.from(0xff)).toInt();
       v >>= 8;
@@ -163,13 +200,25 @@ BigInt _asUint(Uint8List? data) {
   return v;
 }
 
+/// Reads the 32-byte return word as a two's-complement signed integer.
+BigInt _asInt(Uint8List? data) {
+  final v = _asUint(data);
+  return v >= (BigInt.one << 255) ? v - (BigInt.one << 256) : v;
+}
+
+/// Compiles [source] and returns the runtime bytecode of contract [name].
+///
+/// Throws (rather than using `expect`) on any compile error so it can also be
+/// called at `group` body level, not only inside a `test`.
 Uint8List _runtimeOf(String source, String name) {
   final result = (CompilerStack()..addSource('$name.sol', source)).compile();
-  expect(result.diagnostics.where((d) => d.isError), isEmpty,
-      reason: result.diagnostics.map((d) => d.message).join('\n'));
+  final errors = result.diagnostics.where((d) => d.isError);
+  if (errors.isNotEmpty) {
+    throw StateError('compile errors:\n${errors.map((d) => d.message).join('\n')}');
+  }
   final c = result.contracts[name];
-  expect(c, isNotNull);
-  return c!.deployedBytecode;
+  if (c == null) throw StateError('contract "$name" not produced');
+  return c.deployedBytecode;
 }
 
 void main() {
@@ -242,6 +291,152 @@ contract Cmp {
       expect(_asUint(evm.call(_calldata('le(uint256,uint256)', [2, 3]))), BigInt.one);
       expect(_asUint(evm.call(_calldata('le(uint256,uint256)', [3, 3]))), BigInt.one);
       expect(_asUint(evm.call(_calldata('le(uint256,uint256)', [4, 3]))), BigInt.zero);
+    });
+  });
+
+  group('checked arithmetic (Solidity ≥0.8 semantics)', () {
+    final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Math {
+  function add(uint256 a, uint256 b) public pure returns (uint256) { return a + b; }
+  function sub(uint256 a, uint256 b) public pure returns (uint256) { return a - b; }
+  function mul(uint256 a, uint256 b) public pure returns (uint256) { return a * b; }
+  function addUnchecked(uint256 a, uint256 b) public pure returns (uint256) {
+    unchecked { return a + b; }
+  }
+}
+''', 'Math');
+
+    final maxU = (BigInt.one << 256) - BigInt.one;
+
+    test('normal arithmetic still computes the right value', () {
+      expect(_asUint(MiniEvm(code).call(_calldata('add(uint256,uint256)', [40, 2]))),
+          BigInt.from(42));
+      expect(_asUint(MiniEvm(code).call(_calldata('mul(uint256,uint256)', [6, 7]))),
+          BigInt.from(42));
+    });
+
+    test('addition overflow reverts (Panic)', () {
+      final out = MiniEvm(code)
+          .call(_calldataBig('add(uint256,uint256)', [maxU, BigInt.one]));
+      expect(out, isNull, reason: 'MAX + 1 must revert');
+    });
+
+    test('subtraction underflow reverts (Panic)', () {
+      final out = MiniEvm(code)
+          .call(_calldata('sub(uint256,uint256)', [3, 5]));
+      expect(out, isNull, reason: '3 - 5 must revert on uint256');
+    });
+
+    test('multiplication overflow reverts (Panic)', () {
+      final half = BigInt.one << 200;
+      final out = MiniEvm(code)
+          .call(_calldataBig('mul(uint256,uint256)', [half, half]));
+      expect(out, isNull, reason: '2^200 * 2^200 must revert');
+    });
+
+    test('unchecked block wraps instead of reverting', () {
+      final out = MiniEvm(code)
+          .call(_calldataBig('addUnchecked(uint256,uint256)', [maxU, BigInt.one]));
+      expect(_asUint(out), BigInt.zero, reason: 'MAX + 1 wraps to 0 in unchecked');
+    });
+
+    test('narrow uint8 overflow reverts', () {
+      final c = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Narrow {
+  function add8(uint8 a, uint8 b) public pure returns (uint8) { return a + b; }
+}
+''', 'Narrow');
+      expect(_asUint(MiniEvm(c).call(_calldata('add8(uint8,uint8)', [200, 50]))),
+          BigInt.from(250));
+      expect(MiniEvm(c).call(_calldata('add8(uint8,uint8)', [200, 100])), isNull,
+          reason: '200 + 100 overflows uint8 (max 255)');
+    });
+  });
+
+  group('signed integer operations', () {
+    final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Signed {
+  function lt(int256 a, int256 b) public pure returns (bool) { return a < b; }
+  function divide(int256 a, int256 b) public pure returns (int256) { return a / b; }
+  function sub(int256 a, int256 b) public pure returns (int256) { return a - b; }
+}
+''', 'Signed');
+
+    test('signed less-than uses SLT (negative < positive)', () {
+      expect(_asUint(MiniEvm(code).call(_calldata('lt(int256,int256)', [-1, 1]))),
+          BigInt.one, reason: '-1 < 1 is true with signed comparison');
+      expect(_asUint(MiniEvm(code).call(_calldata('lt(int256,int256)', [1, -1]))),
+          BigInt.zero);
+    });
+
+    test('signed division uses SDIV (truncates toward zero)', () {
+      expect(_asInt(MiniEvm(code).call(_calldata('divide(int256,int256)', [-7, 2]))),
+          BigInt.from(-3), reason: '-7 / 2 == -3 (truncated)');
+      expect(_asInt(MiniEvm(code).call(_calldata('divide(int256,int256)', [7, -2]))),
+          BigInt.from(-3));
+    });
+
+    test('signed subtraction yields negative results', () {
+      expect(_asInt(MiniEvm(code).call(_calldata('sub(int256,int256)', [3, 5]))),
+          BigInt.from(-2), reason: '3 - 5 == -2 for int256 (no revert)');
+    });
+
+    test('division by zero reverts (Panic 0x12)', () {
+      expect(MiniEvm(code).call(_calldata('divide(int256,int256)', [1, 0])), isNull);
+    });
+  });
+
+  group('require / assert / revert', () {
+    final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Guard {
+  function mustBePositive(uint256 x) public pure returns (uint256) {
+    require(x > 0, "not positive");
+    return x;
+  }
+  function assertEven(uint256 x) public pure returns (uint256) {
+    assert(x % 2 == 0);
+    return x;
+  }
+  function always() public pure returns (uint256) {
+    revert("nope");
+    return 1;
+  }
+}
+''', 'Guard');
+
+    test('require passes when condition holds', () {
+      expect(_asUint(MiniEvm(code).call(_calldata('mustBePositive(uint256)', [5]))),
+          BigInt.from(5));
+    });
+    test('require reverts when condition fails', () {
+      expect(MiniEvm(code).call(_calldata('mustBePositive(uint256)', [0])), isNull);
+    });
+    test('assert passes / fails correctly', () {
+      expect(_asUint(MiniEvm(code).call(_calldata('assertEven(uint256)', [4]))),
+          BigInt.from(4));
+      expect(MiniEvm(code).call(_calldata('assertEven(uint256)', [3])), isNull);
+    });
+    test('revert(reason) always reverts', () {
+      expect(MiniEvm(code).call(_calldata('always()', [])), isNull);
+    });
+  });
+
+  group('explicit type conversions', () {
+    test('uint8(x) masks to the low byte', () {
+      final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Cast {
+  function toU8(uint256 x) public pure returns (uint8) { return uint8(x); }
+}
+''', 'Cast');
+      expect(_asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x1ff]))),
+          BigInt.from(0xff), reason: '0x1ff truncated to uint8 == 0xff');
+      expect(_asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x42]))),
+          BigInt.from(0x42));
     });
   });
 }

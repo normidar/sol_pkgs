@@ -130,7 +130,11 @@
 | `TypeChecker.check(SourceFile)` エントリポイント | ✅ |
 | 型検査: Literal/BinaryOp/UnaryOp/Assignment/Conditional + 全文 | ✅ |
 | `visitVariableDeclarationStatement`: 宣言変数の型アノテーション | ✅ |
-| テスト (28件通過) | ✅ |
+| **シンボルに実型を割当 (パラメータ/戻り値/ローカル/状態変数を宣言型名から解決)** | ✅ |
+| **数値リテラルの型適応 (`int256 x` に対し `x - 1` を許可)・シフトは左辺型** | ✅ |
+| **明示的型変換 `T(x)` の結果型注釈 (`visitTypeConversion`)** | ✅ |
+| **共有ユーティリティ `solTypeFromTypeName` / `elementarySolType`** | ✅ |
+| テスト (30件通過) | ✅ |
 | FunctionCall の型解決 | ❌ |
 | MemberAccess の型解決 | ❌ |
 | override 整合性チェック / 可視性チェック / pure/view ルール | ❌ |
@@ -179,7 +183,7 @@
 
 ---
 
-### `sol_codegen` ✅ 完成度: 中〜高 (値型コントラクトが実行可能なバイトコードまで通る)
+### `sol_codegen` ✅ 完成度: 高 (値型コントラクトを Solidity ≥0.8 セマンティクスで実行可能なバイトコードに)
 
 | 機能 | 状態 |
 |---|---|
@@ -195,10 +199,20 @@
 | 代入 (`=`) / 複合代入 (`+=` 等) / 前置・後置 `++`・`--` | ✅ |
 | 二項演算子 全対応 (`!=`/`<=`/`>=` は `iszero` 合成, シフトは引数順補正) | ✅ |
 | 単項演算子 (`!` / `~` / 単項 `-` / 単項 `+`) | ✅ |
-| テスト (7件 — Yul AST + 実バイトコード/セレクタ検証) | ✅ |
-| `emit` / `revert(reason)` / コンストラクタ本体 | ❌ |
+| **チェック付き算術 (Solidity ≥0.8): `+`/`-`/`*` が桁あふれで `Panic(0x11)` revert** | ✅ |
+| **`unchecked { … }` ブロック内ではラップ (raw `add`/`sub`/`mul`)** | ✅ |
+| **符号付き整数の比較 (`slt`/`sgt`)・除算 (`sdiv`/`smod`)・右シフト (`sar`)** | ✅ |
+| **ゼロ除算/剰余 → `Panic(0x12)` / 符号付き `MIN/-1` → `Panic(0x11)`** | ✅ |
+| **`require(c)` / `require(c, "msg")` (`Error(string)` エンコード) / `assert(c)` (`Panic(0x01)`)** | ✅ |
+| **`revert()` / `revert("msg")`** | ✅ |
+| **明示的型変換 (`uintN(x)`/`intN(x)`/`address(x)`): マスク / `signextend`** | ✅ |
+| 値型契約を最小EVMで実行検証 (overflow revert / unchecked wrap / 符号付き / require / cast) | ✅ |
+| テスト (7件 codegen + 23件 driver 実行検証) | ✅ |
+| `emit` (イベント/ログ) / コンストラクタ本体 | ❌ |
+| `revert CustomError(args)` のセレクタ付きデータ (今は bare revert) | ❌ |
 | 動的型 (string/bytes/動的配列/mapping) の ABI・ストレージ対応 | ❌ |
-| 符号付き整数の比較 (`slt`/`sgt`) / `&&`・`||` の短絡評価 | ❌ |
+| `&&`・`||` の短絡評価 (値は正しいが副作用は常に評価) | ❌ |
+| `**` の桁あふれチェック | ❌ |
 
 ---
 
@@ -279,6 +293,22 @@
 > B-16〜B-19 は「バイトコードを実際に EVM 実行する」テスト (`sol_driver/test/evm_exec_test.dart`) を
 > 追加して初めて顕在化した。生成物の構造検証だけでは捕捉できない実行時バグだった。
 
+## 解決済みバグ（B-20〜B-26: Solidity ≥0.8 セマンティクス対応）
+
+| # | 場所 | 内容 | 修正日 |
+|---|---|---|---|
+| B-20 | `sol_codegen/ir_generator.dart` | `unchecked { … }` がコード生成で握り潰され本体が消失 → `UncheckedStatement` を処理しブロックを生成 | 2026-06-18 |
+| B-21 | `sol_codegen/ir_generator.dart` | `+`/`-`/`*` に桁あふれチェックがなく 0.8 のチェック付き算術と不一致 → 型幅・符号別の `checked_*` ヘルパで `Panic(0x11)` revert、`unchecked` 内は raw | 2026-06-18 |
+| B-22 | `sol_codegen/ir_generator.dart` | 符号付き整数で常に無符号オペコード (`lt`/`gt`/`div`/`shr`) → 型注釈から `slt`/`sgt`/`sdiv`/`smod`/`sar` を選択 | 2026-06-18 |
+| B-23 | `sol_codegen/ir_generator.dart` | `require`/`assert` が存在しない `fun_require` 等へジャンプ (offset 0 へ暴走) → 組み込みとして lower (`Error(string)` / `Panic(0x01)` エンコード) | 2026-06-18 |
+| B-24 | `sol_codegen/ir_generator.dart` | `revert(...)` 文 (`RevertStatement`) がコード生成で握り潰され消失 → revert を生成 | 2026-06-18 |
+| B-25 | `sol_codegen/ir_generator.dart` | 明示的型変換 `T(x)` (`TypeConversion`) が `0` を生成 → マスク/`signextend` で正しく変換 | 2026-06-18 |
+| B-26 | `sol_sema/{resolver,type_checker}.dart` | 全シンボルが `ErrorType` で型情報が下流に流れず → 宣言型名から実型を割当。併せて数値リテラルの型適応 (`int256 - 1` の偽陽性エラー) とシフト左辺型を修正 | 2026-06-18 |
+
+> B-20〜B-25 はいずれも「コンパイルは通るが実行時に誤った/壊れたバイトコード」を生む
+> 静かな正確性バグ。`sol_driver/test/evm_exec_test.dart` に overflow revert / unchecked wrap /
+> 符号付き比較・除算 / `require`・`assert`・`revert` / キャストの実行検証を追加して回帰を固定。
+
 ## 残存バグ（未修正）
 
 なし（既知のバグはすべて修正済み。未実装機能は各パッケージ表の ❌ を参照）。
@@ -294,13 +324,13 @@
 | sol_ast | 2 | ✅ 全通過 |
 | sol_types | 11 | ✅ 全通過 |
 | sol_parser | 7 | ✅ 全通過 |
-| sol_sema | 28 | ✅ 全通過 |
+| sol_sema | 30 | ✅ 全通過 |
 | sol_abi | 7 | ✅ 全通過 |
 | sol_codegen | 7 | ✅ 全通過 |
 | sol_evm | 7 | ✅ 全通過 |
 | sol_yul | 17 | ✅ 全通過 |
-| sol_driver | 8 | ✅ 全通過 (うち4件は最小EVMでの実行検証) |
-| **合計** | **121** | **✅ 全通過** |
+| sol_driver | 23 | ✅ 全通過 (うち19件は最小EVMでの実行検証) |
+| **合計** | **138** | **✅ 全通過** |
 
 ---
 
@@ -340,21 +370,48 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 
 ## 第2マイルストーン以降（優先度順）
 
-第2マイルストーンの一部（ループ・状態変数・代入・演算子）は完了し、値型のみの
-コントラクト（Counter / ループ集計 / 比較）が**実行可能なバイトコード**になることを
-最小EVMでの実行テストで確認済み。
+第2マイルストーン（ループ・状態変数・代入・演算子）に加え、**Solidity ≥0.8 の
+チェック付き算術・符号付き演算・`require`/`assert`/`revert`・明示的型変換・`unchecked`**
+を実装し、値型コントラクトが**正しいセマンティクスの実行可能バイトコード**になることを
+最小EVMでの実行テスト (19件) で確認済み。
 
 | 優先度 | タスク | 状態 |
 |---|---|---|
 | 高 | `sol_codegen`: for/while/do-while 文のコード生成 | ✅ |
 | 高 | `sol_codegen`: 状態変数 SLOAD/SSTORE + 代入 | ✅ |
+| 高 | `sol_codegen`: チェック付き算術 + `unchecked` (0.8 セマンティクス) | ✅ |
+| 高 | `sol_codegen`: 符号付き比較・除算・シフト (slt/sgt/sdiv/sar) | ✅ |
+| 高 | `sol_codegen`: `require`/`assert`/`revert` + 明示的型変換 | ✅ |
+| 高 | `sol_sema`: シンボルへの実型割当 (符号情報を codegen へ伝播) | ✅ |
 | 高 | `sol_sema`: FunctionCall / MemberAccess の型解決 | ❌ |
-| 中 | `sol_codegen`: emit / revert(reason) / コンストラクタ | ❌ |
+| 中 | `sol_codegen`: emit (イベント/ログ) / コンストラクタ本体 | ❌ |
 | 中 | `sol_codegen`: mapping / 配列 / struct のストレージレイアウト | ❌ |
-| 中 | `sol_codegen`: 符号付き比較 (slt/sgt) / `&&`・`||` の短絡評価 | ❌ |
-| 中 | `sol_sema`: 型検査の全式対応 (FunctionCall, MemberAccess …) | ❌ |
+| 中 | `sol_codegen`: `&&`・`||` の短絡評価 / `**` の桁あふれチェック | ❌ |
+| 中 | `sol_codegen`: `revert CustomError(args)` のセレクタ付きデータ | ❌ |
 | 中 | `sol_abi`: tuple エンコード / ABI デコード | ❌ |
 | 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) | ❌ |
 | 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) | ❌ |
 | 低 | `sol_abi`: NatSpec / メタデータ JSON | ❌ |
 | 低 | `sol_cli`: `--remappings` / `--base-path` | ❌ |
+
+---
+
+## コントラクト検証 (Contract Verification) について
+
+**現状: 未対応。** Etherscan/Sourcify 等での「ソース検証」は、提出したソースを
+**公式 solc が再コンパイルしたバイトコードと一致**することを確認する仕組みであり、
+本コンパイラはそれを満たせない。理由:
+
+1. **バイトコードが solc 互換でない** — 本実装は独自の Yul 下げ・ディスパッチャ・
+   スタック割当を持ち、最適化器もないため、同じソースでも solc と異なるバイト列になる。
+2. **メタデータハッシュ未付与** — solc はバイトコード末尾に CBOR エンコードした
+   メタデータ (ipfs/bzzr ハッシュ + コンパイラバージョン) を付ける。検証はこれに依存するが
+   本実装は未生成 (`sol_abi`: メタデータ JSON が ❌)。
+3. **standard-json の入出力が部分的** — 検証 API は standard-json 互換の
+   入力/出力 (bytecode, deployedBytecode, sourceMap, metadata) を要求するが、
+   sourceMap・metadata 等が未実装。
+
+→ 「自前で出した bytecode と deployedBytecode が再現可能か」という意味での
+   self-consistency は満たす（決定的に同じ出力を生成する）が、**第三者の検証
+   サービスと突き合わせる検証は不可**。対応には (a) メタデータ CBOR 生成、
+   (b) sourceMap 生成、(c) solc 互換の最適化・コード配置、が最低限必要。

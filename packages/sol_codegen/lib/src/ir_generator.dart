@@ -1,6 +1,7 @@
 import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_support/sol_support.dart';
+import 'package:sol_types/sol_types.dart';
 import 'package:sol_yul/sol_yul.dart';
 
 /// Lowers a single [ContractDefinition] (post-sema) to a [YulObject].
@@ -26,6 +27,14 @@ class IRGenerator {
 
   /// Names of locals/parameters in scope (so they shadow state variables).
   final Set<String> _localNames = {};
+
+  /// Whether arithmetic is currently overflow-checked (Solidity ≥0.8 default).
+  /// Set to `false` inside `unchecked { … }` blocks.
+  bool _checked = true;
+
+  /// Runtime helper functions (panics, checked arithmetic) discovered while
+  /// lowering, keyed by name and emitted once into the runtime object.
+  final Map<String, YulFunctionDefinition> _helpers = {};
 
   YulObject generateContract(ContractDefinition contract) {
     _allocateStateVariables(contract);
@@ -94,17 +103,20 @@ class IRGenerator {
   // ── Runtime code ──────────────────────────────────────────────────────────
 
   YulBlock _generateRuntimeCode(ContractDefinition contract) {
+    // Lower the function bodies first: this discovers which runtime helpers
+    // (overflow panics, checked-arithmetic routines) are needed.
+    final functions = <YulStatement>[
+      for (final member in contract.members)
+        if (member is FunctionDefinition && member.body != null)
+          _generateFunction(member),
+    ];
+
     final stmts = <YulStatement>[];
 
     // Dispatcher: read selector and route to functions.
     stmts.add(_generateDispatcher(contract));
 
-    // Function implementations.
-    for (final member in contract.members) {
-      if (member is FunctionDefinition && member.body != null) {
-        stmts.add(_generateFunction(member));
-      }
-    }
+    stmts.addAll(functions);
 
     // Revert if no selector matched.
     stmts.add(YulExpressionStatement(
@@ -113,6 +125,9 @@ class IRGenerator {
         YulLiteral('0', YulLiteralKind.number),
       ]),
     ));
+
+    // Emit discovered helper functions (hoisted alongside the others).
+    stmts.addAll(_helpers.values);
 
     return YulBlock(stmts);
   }
@@ -331,6 +346,17 @@ class IRGenerator {
           initialValue != null ? _generateExpression(initialValue) : null,
         );
 
+      case UncheckedStatement(:final body):
+        // Arithmetic inside `unchecked { … }` wraps instead of reverting.
+        final savedChecked = _checked;
+        _checked = false;
+        final result = _generateBlock(body);
+        _checked = savedChecked;
+        return result;
+
+      case RevertStatement(:final expression):
+        return _generateRevert(expression);
+
       default:
         _diagnostics.warning(
           'Unhandled statement ${stmt.runtimeType} in IR generator',
@@ -359,6 +385,7 @@ class IRGenerator {
             baseOp,
             _readLValue(leftHandSide),
             value,
+            _intTypeOf(leftHandSide) ?? _intTypeOf(rightHandSide),
             expr.location,
           );
         }
@@ -366,16 +393,74 @@ class IRGenerator {
 
       case UnaryOperation(:final operator$, :final subExpression)
           when operator$ == '++' || operator$ == '--':
-        final delta = YulLiteral('1', YulLiteralKind.number);
-        final value = YulFunctionCall(
-          operator$ == '++' ? 'add' : 'sub',
-          [_readLValue(subExpression), delta],
+        final value = _binaryOp(
+          operator$ == '++' ? '+' : '-',
+          _readLValue(subExpression),
+          YulLiteral('1', YulLiteralKind.number),
+          _intTypeOf(subExpression),
+          expr.location,
         );
         return _writeLValue(subExpression, value);
+
+      // Statement-level built-ins: require / assert / revert(...).
+      case FunctionCall(expression: Identifier(:final name), :final arguments)
+          when _isStatementBuiltin(name):
+        return _generateBuiltinStatement(name, arguments, expr.location);
 
       default:
         return YulExpressionStatement(_generateExpression(expr));
     }
+  }
+
+  static bool _isStatementBuiltin(String name) =>
+      name == 'require' || name == 'assert' || name == 'revert';
+
+  /// Lowers `require(c)`, `require(c, "msg")`, `assert(c)`, and `revert(...)`.
+  YulStatement _generateBuiltinStatement(
+    String name,
+    List<Expression> args,
+    SourceLocation location,
+  ) {
+    switch (name) {
+      case 'require':
+        if (args.isEmpty) return YulBlock([]);
+        final cond = _generateExpression(args.first);
+        final onFail = args.length >= 2 && args[1] is Literal
+            ? _revertWithReason((args[1] as Literal).value)
+            : [_revertCall(0, 0)];
+        return YulIf(YulFunctionCall('iszero', [cond]), YulBlock(onFail));
+      case 'assert':
+        if (args.isEmpty) return YulBlock([]);
+        final cond = _generateExpression(args.first);
+        return YulIf(
+          YulFunctionCall('iszero', [cond]),
+          YulBlock([_callStmt(_panic(0x01), const [])]),
+        );
+      case 'revert':
+        return _generateRevert(
+          args.isEmpty ? null : FunctionCall(location, Identifier(location, 'revert'), args, const []),
+        );
+    }
+    return YulBlock([]);
+  }
+
+  /// Lowers a `revert …;` statement. Handles `revert()`, `revert("msg")`, and
+  /// (best-effort) `revert CustomError(...)` → a plain revert with no data.
+  YulStatement _generateRevert(Expression? expression) {
+    if (expression is FunctionCall) {
+      final callee = expression.expression;
+      if (callee is Identifier && callee.name == 'revert') {
+        if (expression.arguments.length == 1 &&
+            expression.arguments.first is Literal) {
+          return YulBlock(
+              _revertWithReason((expression.arguments.first as Literal).value));
+        }
+        return YulBlock([_revertCall(0, 0)]);
+      }
+      // `revert CustomError(args)` — selector-encoded data is not modelled yet;
+      // emit a bare revert so control-flow semantics are still correct.
+    }
+    return YulBlock([_revertCall(0, 0)]);
   }
 
   /// Reads an assignable expression (identifier — local or storage).
@@ -434,18 +519,33 @@ class IRGenerator {
           operator$,
           _generateExpression(left),
           _generateExpression(right),
+          _opIntType(left, right),
           expr.location,
         );
 
       case UnaryOperation(:final operator$, :final subExpression):
         return _unaryOp(operator$, subExpression, expr.location);
 
+      case TypeConversion(:final typeName, :final expression):
+        return _typeConversion(typeName, expression);
+
       case FunctionCall(:final expression, :final arguments):
-        final name = expression is Identifier ? 'fun_${expression.name}' : _tmp();
-        return YulFunctionCall(
-          name,
-          arguments.map(_generateExpression).toList(),
+        if (expression is Identifier) {
+          final builtin = _valueBuiltin(expression.name, arguments.length);
+          if (builtin != null) {
+            return YulFunctionCall(
+                builtin, arguments.map(_generateExpression).toList());
+          }
+          return YulFunctionCall(
+            'fun_${expression.name}',
+            arguments.map(_generateExpression).toList(),
+          );
+        }
+        _diagnostics.warning(
+          'Unsupported call target ${expression.runtimeType} in IR generator',
+          location: expr.location,
         );
+        return YulLiteral('0', YulLiteralKind.number);
 
       case Assignment(:final rightHandSide):
         // Side-effectful; only the assigned value is propagated for now.
@@ -460,25 +560,12 @@ class IRGenerator {
     }
   }
 
-  static const _binaryOpToYul = {
-    '+': 'add',
-    '-': 'sub',
-    '*': 'mul',
-    '/': 'div',
-    '%': 'mod',
-    '**': 'exp',
-    '&': 'and',
-    '|': 'or',
-    '^': 'xor',
-    '<<': 'shl',
-    '>>': 'shr',
-    '>>>': 'shr', // Solidity has no unsigned shift at Yul level
-    '==': 'eq',
-    '<': 'lt',
-    '>': 'gt',
-  };
-
   /// Lowers a binary operator over already-generated operands.
+  ///
+  /// [type] is the integer type that governs the operation (used to pick
+  /// signed vs unsigned opcodes and the width for overflow checks); it is
+  /// `null` when the operands are not integers or are untyped, in which case
+  /// the raw, unsigned, unchecked opcode is used.
   ///
   /// Comparisons without a direct opcode are composed via `iszero`, and shifts
   /// reorder operands to Yul's `shl(shift, value)` / `shr(shift, value)`.
@@ -486,40 +573,77 @@ class IRGenerator {
     String op,
     YulExpression l,
     YulExpression r,
+    IntType? type,
     SourceLocation location,
   ) {
+    final signed = type?.signed ?? false;
     switch (op) {
+      // ── Arithmetic (overflow-checked outside `unchecked`) ──
+      case '+':
+      case '-':
+      case '*':
+        if (type != null && _checked) {
+          return YulFunctionCall(_checkedArith(op, type), [l, r]);
+        }
+        return YulFunctionCall(_rawArith(op), [l, r]);
+      case '/':
+        if (type != null) return YulFunctionCall(_checkedDivMod('/', type), [l, r]);
+        return YulFunctionCall('div', [l, r]);
+      case '%':
+        if (type != null) return YulFunctionCall(_checkedDivMod('%', type), [l, r]);
+        return YulFunctionCall('mod', [l, r]);
+      case '**':
+        // Exponentiation overflow checking is not yet modelled.
+        return YulFunctionCall('exp', [l, r]);
+
+      // ── Comparisons (signedness-aware) ──
+      case '==':
+        return YulFunctionCall('eq', [l, r]);
       case '!=':
-        return YulFunctionCall('iszero', [
-          YulFunctionCall('eq', [l, r]),
-        ]);
+        return YulFunctionCall('iszero', [YulFunctionCall('eq', [l, r])]);
+      case '<':
+        return YulFunctionCall(signed ? 'slt' : 'lt', [l, r]);
+      case '>':
+        return YulFunctionCall(signed ? 'sgt' : 'gt', [l, r]);
       case '<=':
-        return YulFunctionCall('iszero', [
-          YulFunctionCall('gt', [l, r]),
-        ]);
+        return YulFunctionCall(
+            'iszero', [YulFunctionCall(signed ? 'sgt' : 'gt', [l, r])]);
       case '>=':
-        return YulFunctionCall('iszero', [
-          YulFunctionCall('lt', [l, r]),
-        ]);
-      // NOTE: `&&`/`||` are lowered without short-circuit evaluation; correct
-      // for side-effect-free operands (the common case in conditions).
+        return YulFunctionCall(
+            'iszero', [YulFunctionCall(signed ? 'slt' : 'lt', [l, r])]);
+
+      // ── Bitwise & logical ──
+      case '&':
+        return YulFunctionCall('and', [l, r]);
+      case '|':
+        return YulFunctionCall('or', [l, r]);
+      case '^':
+        return YulFunctionCall('xor', [l, r]);
+      // NOTE: `&&`/`||` are value-correct for booleans (always 0/1) but are not
+      // yet short-circuited; an operand with side effects is always evaluated.
       case '&&':
         return YulFunctionCall('and', [l, r]);
       case '||':
         return YulFunctionCall('or', [l, r]);
+
+      // ── Shifts: Yul takes shl/shr/sar(shift, value) ──
       case '<<':
-        return YulFunctionCall('shl', [r, l]); // shl(shift, value)
+        return YulFunctionCall('shl', [r, l]);
       case '>>':
+        return YulFunctionCall(signed ? 'sar' : 'shr', [r, l]);
       case '>>>':
-        return YulFunctionCall('shr', [r, l]); // shr(shift, value)
+        return YulFunctionCall('shr', [r, l]);
     }
-    final fn = _binaryOpToYul[op];
-    if (fn == null) {
-      _diagnostics.error('Unsupported binary operator "$op"', location: location);
-      return YulLiteral('0', YulLiteralKind.number);
-    }
-    return YulFunctionCall(fn, [l, r]);
+    _diagnostics.error('Unsupported binary operator "$op"', location: location);
+    return YulLiteral('0', YulLiteralKind.number);
   }
+
+  static String _rawArith(String op) => switch (op) {
+        '+' => 'add',
+        '-' => 'sub',
+        '*' => 'mul',
+        _ => 'add',
+      };
 
   /// Lowers a unary operator to a Yul expression.
   ///
@@ -540,10 +664,13 @@ class IRGenerator {
         return _generateExpression(sub); // unary plus: no-op
       case '++':
       case '--':
-        return YulFunctionCall(op == '++' ? 'add' : 'sub', [
+        return _binaryOp(
+          op == '++' ? '+' : '-',
           _readLValue(sub),
           YulLiteral('1', YulLiteralKind.number),
-        ]);
+          _intTypeOf(sub),
+          location,
+        );
     }
     _diagnostics.error('Unsupported unary operator "$op"', location: location);
     return YulLiteral('0', YulLiteralKind.number);
@@ -568,6 +695,281 @@ class IRGenerator {
     return YulFunctionCall('calldataload', [
       YulLiteral('${4 + index * 32}', YulLiteralKind.number),
     ]);
+  }
+
+  // ── Type inference for code generation ─────────────────────────────────────
+
+  /// The integer type that governs a binary operation over [left]/[right], or
+  /// `null` if it is not over modelled integers. A non-literal operand's type
+  /// is preferred because number literals are typed `uint256` by the checker
+  /// and would otherwise mask the real width and signedness.
+  IntType? _opIntType(Expression left, Expression right) {
+    final lt = _intTypeOf(left);
+    final rt = _intTypeOf(right);
+    if (left is! Literal && lt != null) return lt;
+    if (right is! Literal && rt != null) return rt;
+    return lt ?? rt;
+  }
+
+  IntType? _intTypeOf(Expression e) {
+    final t = e.annotation;
+    return t is IntType ? t : null;
+  }
+
+  // ── Built-in value functions ───────────────────────────────────────────────
+
+  /// Maps an expression-position built-in to its Yul/EVM builtin, or `null`
+  /// if [name] is not a (supported) value-returning built-in.
+  static String? _valueBuiltin(String name, int argc) {
+    switch (name) {
+      case 'addmod':
+        return argc == 3 ? 'addmod' : null;
+      case 'mulmod':
+        return argc == 3 ? 'mulmod' : null;
+      case 'gasleft':
+        return argc == 0 ? 'gas' : null;
+      case 'blockhash':
+        return argc == 1 ? 'blockhash' : null;
+      default:
+        return null;
+    }
+  }
+
+  // ── Type conversions (casts) ───────────────────────────────────────────────
+
+  /// Lowers `T(x)` for elementary value types. Widening (or same-width) casts
+  /// are no-ops on the 256-bit word; narrowing masks (unsigned/address) or
+  /// sign-extends (signed) down to the target width.
+  YulExpression _typeConversion(TypeName typeName, Expression expr) {
+    final value = _generateExpression(expr);
+    if (typeName is! ElementaryTypeName) return value;
+    final name = typeName.name;
+    if (name == 'bool') return value;
+    if (name == 'address' || name == 'address payable') {
+      return YulFunctionCall('and', [value, YulLiteral(_maskHex(160), YulLiteralKind.number)]);
+    }
+    if (name.startsWith('uint')) {
+      final bits = typeName.intWidth == 0 ? 256 : typeName.intWidth;
+      if (bits >= 256) return value;
+      return YulFunctionCall('and', [value, YulLiteral(_maskHex(bits), YulLiteralKind.number)]);
+    }
+    if (name.startsWith('int')) {
+      final bits = typeName.intWidth == 0 ? 256 : typeName.intWidth;
+      if (bits >= 256) return value;
+      return YulFunctionCall('signextend', [
+        YulLiteral('${bits ~/ 8 - 1}', YulLiteralKind.number),
+        value,
+      ]);
+    }
+    // bytesN / string / bytes: keep as-is for the value-type subset.
+    return value;
+  }
+
+  // ── Checked arithmetic & panics ────────────────────────────────────────────
+
+  String _register(String name, YulFunctionDefinition Function() build) {
+    if (!_helpers.containsKey(name)) _helpers[name] = build();
+    return name;
+  }
+
+  /// Name of the Panic(uint256) helper for [code] (e.g. 0x11 overflow,
+  /// 0x12 division by zero), registering it on first use.
+  String _panic(int code) {
+    final name = 'panic_0x${code.toRadixString(16)}';
+    return _register(
+      name,
+      () => YulFunctionDefinition(name, const [], const [], YulBlock([
+        _callStmt('mstore', [_n('0'), _n(_selectorWord(0x4e487b71))]),
+        _callStmt('mstore', [_n('4'), _n('0x${code.toRadixString(16)}')]),
+        _callStmt('revert', [_n('0'), _n('0x24')]),
+      ])),
+    );
+  }
+
+  /// Registers and names the overflow-checked add/sub/mul routine for [t].
+  String _checkedArith(String op, IntType t) {
+    final kind = op == '+'
+        ? 'add'
+        : op == '-'
+            ? 'sub'
+            : 'mul';
+    final name = 'checked_${kind}_${t.abiType}';
+    return _register(name, () => _buildCheckedArith(name, kind, t));
+  }
+
+  YulFunctionDefinition _buildCheckedArith(String name, String kind, IntType t) {
+    final w = t.bits;
+    final panic = _panic(0x11);
+    final body = <YulStatement>[
+      YulAssignment(['r'], YulFunctionCall(kind, [_id('x'), _id('y')])),
+    ];
+    if (!t.signed) {
+      switch (kind) {
+        case 'add':
+          body.add(w == 256
+              ? _ifPanic(_c('gt', [_id('x'), _id('r')]), panic) // r < x
+              : _ifPanic(_c('gt', [_id('r'), _n(_maxHex(t))]), panic));
+        case 'sub':
+          body.add(_ifPanic(_c('gt', [_id('y'), _id('x')]), panic)); // y > x
+        case 'mul':
+          body.add(_ifPanic(
+            _c('and', [
+              _c('iszero', [_c('iszero', [_id('x')])]),
+              _c('iszero', [_c('eq', [_c('div', [_id('r'), _id('x')]), _id('y')])]),
+            ]),
+            panic,
+          ));
+          if (w < 256) {
+            body.add(_ifPanic(_c('gt', [_id('r'), _n(_maxHex(t))]), panic));
+          }
+      }
+    } else {
+      switch (kind) {
+        case 'add':
+          body.add(w == 256
+              ? _ifPanic(
+                  _c('or', [
+                    _c('and', [_c('sgt', [_id('y'), _n('0')]), _c('slt', [_id('r'), _id('x')])]),
+                    _c('and', [_c('slt', [_id('y'), _n('0')]), _c('sgt', [_id('r'), _id('x')])]),
+                  ]),
+                  panic)
+              : _ifPanic(_signedOutOfRange('r', t), panic));
+        case 'sub':
+          body.add(w == 256
+              ? _ifPanic(
+                  _c('or', [
+                    _c('and', [_c('iszero', [_c('slt', [_id('y'), _n('0')])]), _c('sgt', [_id('r'), _id('x')])]),
+                    _c('and', [_c('slt', [_id('y'), _n('0')]), _c('slt', [_id('r'), _id('x')])]),
+                  ]),
+                  panic)
+              : _ifPanic(_signedOutOfRange('r', t), panic));
+        case 'mul':
+          body.add(_ifPanic(
+            _c('and', [
+              _c('iszero', [_c('iszero', [_id('x')])]),
+              _c('iszero', [_c('eq', [_c('sdiv', [_id('r'), _id('x')]), _id('y')])]),
+            ]),
+            panic,
+          ));
+          body.add(w == 256
+              ? _ifPanic(
+                  _c('and', [
+                    _c('eq', [_id('x'), _n(_minusOneHex)]),
+                    _c('eq', [_id('y'), _n(_minHex(t))]),
+                  ]),
+                  panic)
+              : _ifPanic(_signedOutOfRange('r', t), panic));
+      }
+    }
+    return YulFunctionDefinition(name, ['x', 'y'], ['r'], YulBlock(body));
+  }
+
+  /// Registers and names the checked division/modulo routine for [t]
+  /// (Panic(0x12) on a zero divisor, Panic(0x11) on `type(T).min / -1`).
+  String _checkedDivMod(String op, IntType t) {
+    final yulOp = op == '/'
+        ? (t.signed ? 'sdiv' : 'div')
+        : (t.signed ? 'smod' : 'mod');
+    final name = 'checked_${yulOp}_${t.abiType}';
+    return _register(name, () => _buildCheckedDivMod(name, op, yulOp, t));
+  }
+
+  YulFunctionDefinition _buildCheckedDivMod(
+      String name, String op, String yulOp, IntType t) {
+    final isDiv = op == '/';
+    final body = <YulStatement>[
+      _ifPanic(_c('iszero', [_id('y')]), _panic(0x12)),
+    ];
+    if (t.signed && isDiv && t.bits == 256) {
+      body.add(_ifPanic(
+        _c('and', [
+          _c('eq', [_id('x'), _n(_minHex(t))]),
+          _c('eq', [_id('y'), _n(_minusOneHex)]),
+        ]),
+        _panic(0x11),
+      ));
+    }
+    body.add(YulAssignment(['r'], _c(yulOp, [_id('x'), _id('y')])));
+    if (t.signed && isDiv && t.bits < 256) {
+      body.add(_ifPanic(_signedOutOfRange('r', t), _panic(0x11)));
+    }
+    return YulFunctionDefinition(name, ['x', 'y'], ['r'], YulBlock(body));
+  }
+
+  YulExpression _signedOutOfRange(String v, IntType t) => _c('or', [
+        _c('sgt', [_id(v), _n(_maxHex(t))]),
+        _c('slt', [_id(v), _n(_minHex(t))]),
+      ]);
+
+  // ── Revert helpers ─────────────────────────────────────────────────────────
+
+  /// `revert(off, len)` as a statement.
+  YulStatement _revertCall(int off, int len) =>
+      _callStmt('revert', [_n('$off'), _n('$len')]);
+
+  /// Encodes `Error(string)` revert data for [message] and reverts with it.
+  List<YulStatement> _revertWithReason(String message) {
+    final msg = _unquote(message);
+    final bytes = msg.codeUnits;
+    final len = bytes.length;
+    final chunks = (len + 31) ~/ 32;
+    final stmts = <YulStatement>[
+      _callStmt('mstore', [_n('0'), _n(_selectorWord(0x08c379a0))]),
+      _callStmt('mstore', [_n('4'), _n('0x20')]),
+      _callStmt('mstore', [_n('0x24'), _n('$len')]),
+      for (var i = 0; i < chunks; i++)
+        _callStmt('mstore', [_n('${0x44 + i * 32}'), _n(_dataWord(bytes, i * 32))]),
+      _revertCall(0, 0x44 + chunks * 0x20),
+    ];
+    return stmts;
+  }
+
+  static String _unquote(String s) {
+    if (s.length >= 2 &&
+        ((s.startsWith('"') && s.endsWith('"')) ||
+            (s.startsWith("'") && s.endsWith("'")))) {
+      return s.substring(1, s.length - 1);
+    }
+    return s;
+  }
+
+  // ── Yul construction shorthands ─────────────────────────────────────────────
+
+  static YulIdentifier _id(String name) => YulIdentifier(name);
+  static YulLiteral _n(String value) => YulLiteral(value, YulLiteralKind.number);
+  static YulFunctionCall _c(String name, List<YulExpression> args) =>
+      YulFunctionCall(name, args);
+  static YulStatement _callStmt(String name, List<YulExpression> args) =>
+      YulExpressionStatement(YulFunctionCall(name, args));
+  static YulIf _ifPanic(YulExpression cond, String panicFn) =>
+      YulIf(cond, YulBlock([_callStmt(panicFn, const [])]));
+
+  // ── Numeric literal formatting ──────────────────────────────────────────────
+
+  static String _maskHex(int bits) =>
+      '0x${((BigInt.one << bits) - BigInt.one).toRadixString(16)}';
+
+  static String _maxHex(IntType t) => '0x${t.max.toRadixString(16)}';
+
+  /// 256-bit two's-complement representation of the (negative) signed minimum.
+  static String _minHex(IntType t) =>
+      '0x${((BigInt.one << 256) + t.min).toRadixString(16)}';
+
+  static final String _minusOneHex =
+      '0x${((BigInt.one << 256) - BigInt.one).toRadixString(16)}';
+
+  /// A 4-byte selector left-aligned in a 32-byte word (e.g. for `mstore(0, …)`).
+  static String _selectorWord(int selector) =>
+      '0x${selector.toRadixString(16).padLeft(8, '0')}${'0' * 56}';
+
+  /// 32 bytes of [bytes] starting at [start], right-padded, as a `0x…` word.
+  static String _dataWord(List<int> bytes, int start) {
+    final sb = StringBuffer('0x');
+    for (var i = 0; i < 32; i++) {
+      final b = (start + i) < bytes.length ? bytes[start + i] & 0xff : 0;
+      sb.write(b.toRadixString(16).padLeft(2, '0'));
+    }
+    return sb.toString();
   }
 
   String _tmp() => '__tmp${_tmpCounter++}';
