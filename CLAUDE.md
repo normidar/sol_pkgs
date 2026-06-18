@@ -1,0 +1,2 @@
+miseを使ってdartバージョン管理してください
+すべてが終わったらmelos formatとmelos analyzeとmelos testを実行してください
