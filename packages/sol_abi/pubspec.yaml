@@ -2,6 +2,7 @@ name: sol_abi
 description: >
   ABI JSON, metadata JSON, and NatSpec generation for the sol_pkgs Solidity compiler.
 version: 0.1.0+1
+repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_abi
 
 environment:
   sdk: ">=3.12.0 <4.0.0"

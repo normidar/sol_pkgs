@@ -3,6 +3,7 @@ description: >
   Solidity type system for the sol_pkgs compiler.
   Defines the runtime type lattice, implicit/explicit conversions, and mutability.
 version: 0.1.0+1
+repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_types
 
 environment:
   sdk: ">=3.12.0 <4.0.0"

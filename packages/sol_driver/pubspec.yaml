@@ -3,6 +3,7 @@ description: >
   Compiler orchestration and standard-JSON I/O for the sol_pkgs Solidity compiler.
   Equivalent to solc's CompilerStack.
 version: 0.1.0+1
+repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_driver
 
 environment:
   sdk: ">=3.12.0 <4.0.0"

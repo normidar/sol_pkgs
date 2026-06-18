@@ -3,6 +3,7 @@ description: >
   Recursive-descent Solidity parser for the sol_pkgs compiler.
   Converts a token stream into a typed AST.
 version: 0.1.0+1
+repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_parser
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
