@@ -21,7 +21,15 @@ class IRGenerator {
   /// Yul slot names of the return variables of the function being lowered.
   final List<String> _returnSlots = [];
 
+  /// Storage slot assigned to each mutable state variable.
+  final Map<String, int> _stateVarSlots = {};
+
+  /// Names of locals/parameters in scope (so they shadow state variables).
+  final Set<String> _localNames = {};
+
   YulObject generateContract(ContractDefinition contract) {
+    _allocateStateVariables(contract);
+
     final runtimeBlock = _generateRuntimeCode(contract);
     final deployBlock = _generateDeploymentCode(contract.name);
 
@@ -38,6 +46,21 @@ class IRGenerator {
       [runtimeObj],
       {},
     );
+  }
+
+  /// Assigns sequential storage slots to mutable state variables.
+  ///
+  /// `constant` variables are inlined and `immutable` ones live in code, so
+  /// neither occupies a storage slot.
+  void _allocateStateVariables(ContractDefinition contract) {
+    _stateVarSlots.clear();
+    var slot = 0;
+    for (final member in contract.members) {
+      if (member is StateVariableDeclaration &&
+          member.mutability == VariableMutability.mutable) {
+        _stateVarSlots[member.name] = slot++;
+      }
+    }
   }
 
   // ── Deployment code ───────────────────────────────────────────────────────
@@ -167,13 +190,23 @@ class IRGenerator {
     ];
 
     final savedReturnSlots = List<String>.from(_returnSlots);
+    final savedLocals = Set<String>.from(_localNames);
     _returnSlots
       ..clear()
       ..addAll(rets);
+    _localNames
+      ..clear()
+      ..addAll(fn.parameters.map((p) => p.name).whereType<String>())
+      ..addAll(fn.returnParameters.map((p) => p.name).whereType<String>());
+
     final body = fn.body != null ? _generateBlock(fn.body!) : YulBlock([]);
+
     _returnSlots
       ..clear()
       ..addAll(savedReturnSlots);
+    _localNames
+      ..clear()
+      ..addAll(savedLocals);
 
     return YulFunctionDefinition('fun_${fn.name}', params, rets, body);
   }
@@ -217,10 +250,60 @@ class IRGenerator {
         ]);
 
       case ExpressionStatement(:final expression):
-        return YulExpressionStatement(_generateExpression(expression));
+        return _generateExpressionStatement(expression);
 
       case Block():
         return _generateBlock(stmt);
+
+      case ForStatement(
+          :final initStatement,
+          :final condition,
+          :final loopExpression,
+          :final body
+        ):
+        return YulForLoop(
+          initStatement != null
+              ? YulBlock([_generateStatement(initStatement)])
+              : YulBlock([]),
+          condition != null
+              ? _generateExpression(condition)
+              : YulLiteral('1', YulLiteralKind.number),
+          loopExpression != null
+              ? YulBlock([_generateStatement(loopExpression)])
+              : YulBlock([]),
+          _generateBlock2(body),
+        );
+
+      case WhileStatement(:final condition, :final body):
+        return YulForLoop(
+          YulBlock([]),
+          _generateExpression(condition),
+          YulBlock([]),
+          _generateBlock2(body),
+        );
+
+      case DoWhileStatement(:final condition, :final body):
+        // Yul has no do-while; run the body, then loop while the condition holds.
+        // `for {} 1 {} { <body>; if iszero(cond) { break } }`
+        final loopBody = <YulStatement>[
+          ..._generateBlock2(body).statements,
+          YulIf(
+            YulFunctionCall('iszero', [_generateExpression(condition)]),
+            YulBlock([YulBreak()]),
+          ),
+        ];
+        return YulForLoop(
+          YulBlock([]),
+          YulLiteral('1', YulLiteralKind.number),
+          YulBlock([]),
+          YulBlock(loopBody),
+        );
+
+      case BreakStatement():
+        return YulBreak();
+
+      case ContinueStatement():
+        return YulContinue();
 
       case IfStatement(:final condition, :final trueBody, :final falseBody):
         if (falseBody == null) {
@@ -237,6 +320,9 @@ class IRGenerator {
         ]);
 
       case VariableDeclarationStatement(:final declarations, :final initialValue):
+        for (final d in declarations) {
+          if (d != null) _localNames.add(d.name);
+        }
         final names = declarations
             .map((d) => d != null ? 'var_${d.name}' : '_')
             .toList();
@@ -259,6 +345,72 @@ class IRGenerator {
     return YulBlock([_generateStatement(stmt)]);
   }
 
+  /// Lowers an expression used as a statement, giving assignments and
+  /// increment/decrement their store side-effect (which a value-only
+  /// [_generateExpression] cannot express).
+  YulStatement _generateExpressionStatement(Expression expr) {
+    switch (expr) {
+      case Assignment(:final operator$, :final leftHandSide, :final rightHandSide):
+        var value = _generateExpression(rightHandSide);
+        if (operator$ != '=') {
+          // Compound assignment: x op= y  ⇒  x = x op y.
+          final baseOp = operator$.substring(0, operator$.length - 1);
+          value = _binaryOp(
+            baseOp,
+            _readLValue(leftHandSide),
+            value,
+            expr.location,
+          );
+        }
+        return _writeLValue(leftHandSide, value);
+
+      case UnaryOperation(:final operator$, :final subExpression)
+          when operator$ == '++' || operator$ == '--':
+        final delta = YulLiteral('1', YulLiteralKind.number);
+        final value = YulFunctionCall(
+          operator$ == '++' ? 'add' : 'sub',
+          [_readLValue(subExpression), delta],
+        );
+        return _writeLValue(subExpression, value);
+
+      default:
+        return YulExpressionStatement(_generateExpression(expr));
+    }
+  }
+
+  /// Reads an assignable expression (identifier — local or storage).
+  YulExpression _readLValue(Expression target) {
+    if (target is Identifier && _isStateVar(target.name)) {
+      return YulFunctionCall('sload', [_slot(target.name)]);
+    }
+    return _generateExpression(target);
+  }
+
+  /// Writes [value] to an assignable expression as a statement.
+  YulStatement _writeLValue(Expression target, YulExpression value) {
+    if (target is Identifier) {
+      if (_isStateVar(target.name)) {
+        return YulExpressionStatement(
+          YulFunctionCall('sstore', [_slot(target.name), value]),
+        );
+      }
+      return YulAssignment(['var_${target.name}'], value);
+    }
+    // Index/member assignment (mappings, arrays, structs) needs storage-layout
+    // computation and is not yet supported.
+    _diagnostics.warning(
+      'Unhandled assignment target ${target.runtimeType} in IR generator',
+      location: target.location,
+    );
+    return YulExpressionStatement(value);
+  }
+
+  bool _isStateVar(String name) =>
+      !_localNames.contains(name) && _stateVarSlots.containsKey(name);
+
+  YulExpression _slot(String name) =>
+      YulLiteral('${_stateVarSlots[name]}', YulLiteralKind.number);
+
   YulExpression _generateExpression(Expression expr) {
     switch (expr) {
       case Literal(:final kind, :final value):
@@ -272,19 +424,21 @@ class IRGenerator {
         );
 
       case Identifier(:final name):
+        if (_isStateVar(name)) {
+          return YulFunctionCall('sload', [_slot(name)]);
+        }
         return YulIdentifier('var_$name');
 
       case BinaryOperation(:final operator$, :final left, :final right):
-        final yulFn = _binaryOpToYul[operator$];
-        if (yulFn == null) {
-          _diagnostics.error('Unsupported binary operator "${operator$}"',
-              location: expr.location);
-          return YulLiteral('0', YulLiteralKind.number);
-        }
-        return YulFunctionCall(yulFn, [
+        return _binaryOp(
+          operator$,
           _generateExpression(left),
           _generateExpression(right),
-        ]);
+          expr.location,
+        );
+
+      case UnaryOperation(:final operator$, :final subExpression):
+        return _unaryOp(operator$, subExpression, expr.location);
 
       case FunctionCall(:final expression, :final arguments):
         final name = expression is Identifier ? 'fun_${expression.name}' : _tmp();
@@ -323,6 +477,77 @@ class IRGenerator {
     '<': 'lt',
     '>': 'gt',
   };
+
+  /// Lowers a binary operator over already-generated operands.
+  ///
+  /// Comparisons without a direct opcode are composed via `iszero`, and shifts
+  /// reorder operands to Yul's `shl(shift, value)` / `shr(shift, value)`.
+  YulExpression _binaryOp(
+    String op,
+    YulExpression l,
+    YulExpression r,
+    SourceLocation location,
+  ) {
+    switch (op) {
+      case '!=':
+        return YulFunctionCall('iszero', [
+          YulFunctionCall('eq', [l, r]),
+        ]);
+      case '<=':
+        return YulFunctionCall('iszero', [
+          YulFunctionCall('gt', [l, r]),
+        ]);
+      case '>=':
+        return YulFunctionCall('iszero', [
+          YulFunctionCall('lt', [l, r]),
+        ]);
+      // NOTE: `&&`/`||` are lowered without short-circuit evaluation; correct
+      // for side-effect-free operands (the common case in conditions).
+      case '&&':
+        return YulFunctionCall('and', [l, r]);
+      case '||':
+        return YulFunctionCall('or', [l, r]);
+      case '<<':
+        return YulFunctionCall('shl', [r, l]); // shl(shift, value)
+      case '>>':
+      case '>>>':
+        return YulFunctionCall('shr', [r, l]); // shr(shift, value)
+    }
+    final fn = _binaryOpToYul[op];
+    if (fn == null) {
+      _diagnostics.error('Unsupported binary operator "$op"', location: location);
+      return YulLiteral('0', YulLiteralKind.number);
+    }
+    return YulFunctionCall(fn, [l, r]);
+  }
+
+  /// Lowers a unary operator to a Yul expression.
+  ///
+  /// `++`/`--` return the updated value here; their store side-effect is only
+  /// emitted when they appear as a statement ([_generateExpressionStatement]).
+  YulExpression _unaryOp(String op, Expression sub, SourceLocation location) {
+    switch (op) {
+      case '!':
+        return YulFunctionCall('iszero', [_generateExpression(sub)]);
+      case '~':
+        return YulFunctionCall('not', [_generateExpression(sub)]);
+      case '-':
+        return YulFunctionCall('sub', [
+          YulLiteral('0', YulLiteralKind.number),
+          _generateExpression(sub),
+        ]);
+      case '+':
+        return _generateExpression(sub); // unary plus: no-op
+      case '++':
+      case '--':
+        return YulFunctionCall(op == '++' ? 'add' : 'sub', [
+          _readLValue(sub),
+          YulLiteral('1', YulLiteralKind.number),
+        ]);
+    }
+    _diagnostics.error('Unsupported unary operator "$op"', location: location);
+    return YulLiteral('0', YulLiteralKind.number);
+  }
 
   // ── ABI helpers ───────────────────────────────────────────────────────────
 

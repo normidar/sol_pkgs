@@ -49,6 +49,10 @@ class YulCodeGenerator {
   _FunctionContext? _currentFunction;
   int _labelCounter = 0;
 
+  /// Number of return values for each user-defined function, so call sites know
+  /// how many results to keep/pop (void functions leave none).
+  final Map<String, int> _functionReturnCounts = {};
+
   /// The name and byte size of the embedded deployed (runtime) sub-object,
   /// used to resolve `dataoffset(...)` / `datasize(...)` in creation code.
   String? _deployedName;
@@ -92,6 +96,13 @@ class YulCodeGenerator {
   void _generateBlock(YulBlock block, {bool hoistFunctions = false}) {
     // Emit function definitions (hoisted) first so they are always reachable.
     if (hoistFunctions) {
+      // Record arities up front so calls — including forward references and
+      // mutual recursion — know how many results each function leaves.
+      for (final stmt in block.statements) {
+        if (stmt is YulFunctionDefinition) {
+          _functionReturnCounts[stmt.name] = stmt.returnVariables.length;
+        }
+      }
       for (final stmt in block.statements) {
         if (stmt is YulFunctionDefinition) _generateFunctionDefinition(stmt);
       }
@@ -114,13 +125,18 @@ class YulCodeGenerator {
 
       case YulVariableDeclaration(:final variables, :final value):
         if (variables.length == 1) {
-          // Single variable: push value, name the slot.
+          // Single variable: produce the value, then name the slot it left on
+          // top. _generateExpression already pushes one (anonymous) slot, so
+          // rename it rather than pushing a second — otherwise the frame model
+          // drifts from the real stack and later DUP depths are wrong.
           if (value != null) {
             _generateExpression(value);
+            _frame.pop(); // drop the anonymous result slot…
+            _frame.push(variables.first); // …and re-add it under its name.
           } else {
             _asm.emit(Opcode.PUSH0);
+            _frame.push(variables.first);
           }
-          _frame.push(variables.first);
         } else {
           // Multi-variable: value must be a multi-return function call.
           // Each return value is already on the stack after _generateExpression.
@@ -303,8 +319,8 @@ class YulCodeGenerator {
     } else {
       // User-defined Yul function call.
       // Convention: PUSH retlabel, push args right-to-left, JUMP fn_name.
-      // Function returns M values on stack after return.
-      // For now we assume 1 return value (M=1) or 0 (M=0).
+      // The function leaves its M return values on the stack after returning.
+      final retCount = _functionReturnCounts[name] ?? 1;
       final retLabel = _freshLabel('ret');
       _asm.pushLabel(retLabel);
       _frame.push(); // retlabel slot
@@ -317,11 +333,10 @@ class YulCodeGenerator {
       _asm.label(retLabel); // JUMPDEST — function has cleaned up and returned
 
       // After return: N+1 slots (retlabel + args) are gone; M return values remain.
-      // Remove arg + retlabel slots from frame model.
       for (var i = 0; i < arguments.length + 1; i++) _frame.pop();
-      // The function leaves its return value(s) on the stack; push 1 slot.
-      // (Multi-return not fully supported yet.)
-      _frame.push(); // return value slot
+      for (var i = 0; i < retCount; i++) {
+        _frame.push(); // one slot per return value (none for void functions)
+      }
     }
   }
 
@@ -340,10 +355,12 @@ class YulCodeGenerator {
             _frame.pop();
           }
         } else {
-          // User function: if it has a return value, pop it.
-          // For now we conservatively pop 1 (since we pushed 1 in _generateCall).
-          _asm.pop();
-          _frame.pop();
+          // User function: pop each of its return values (none for void).
+          final retCount = _functionReturnCounts[name] ?? 1;
+          for (var i = 0; i < retCount; i++) {
+            _asm.pop();
+            _frame.pop();
+          }
         }
       default:
         // Literals and identifiers leave a value; pop it.
@@ -427,6 +444,15 @@ class YulCodeGenerator {
     }
     final m = ctx.returnCount;
     final n = ctx.paramCount;
+
+    // Locals declared in the body sit above the return-value slots. Discard
+    // them so the stack is exactly [returns, params, retlabel] before cleanup.
+    // (The frame model is intentionally left untouched: control-flow leaves the
+    // function, but any following fall-through code keeps the same model.)
+    final locals = _frame.size - (m + n + 1);
+    for (var i = 0; i < locals; i++) {
+      _asm.pop();
+    }
 
     if (m == 0) {
       // No return values: pop params, then JUMP to retlabel.

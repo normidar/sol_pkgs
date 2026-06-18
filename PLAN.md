@@ -148,6 +148,7 @@
 | `pushLabel(name)` — ラベルオフセットをスタック値として PUSH2 生成 | ✅ |
 | 2パスラベル解決 (`PushLabelInstruction` 対応済み) | ✅ |
 | `pushDeployedOffset()` — 連結ランタイムの開始オフセット解決 (`dataoffset` 用) | ✅ |
+| 2パスのオフセット計算修正 (JUMP=4バイト / JUMPDEST=1バイト) | ✅ |
 | テスト (7件通過) | ✅ |
 | バイトコードリンカ (library address placeholder) | ❌ |
 
@@ -169,6 +170,8 @@
 | 組み込み void 関数 (mstore/sstore/log*/pop/return 等) の POP 抑制 | ✅ |
 | サブオブジェクト連結 (creation コード + ランタイムコード) / `generateDeployed` | ✅ |
 | `dataoffset` / `datasize` の解決 (デプロイラッパからランタイム参照) | ✅ |
+| 関数の返り値個数を記録 (void 関数呼び出しの余分な POP を防止) | ✅ |
+| `let` 宣言のフレーム二重カウント修正 / `leave` でローカルを掃除 | ✅ |
 | テスト (17件通過) | ✅ |
 | Yul パーサ (`assembly { … }` ブロック) | ❌ |
 | 複数返り値関数 (M>1) のホイスト | ❌ |
@@ -176,7 +179,7 @@
 
 ---
 
-### `sol_codegen` ✅ 完成度: 中 (Adder がバイトコードまで通る)
+### `sol_codegen` ✅ 完成度: 中〜高 (値型コントラクトが実行可能なバイトコードまで通る)
 
 | 機能 | 状態 |
 |---|---|
@@ -187,12 +190,15 @@
 | 関数セレクタ = keccak256(canonical signature)[:4] (`sol_abi` 共有) | ✅ |
 | ABI パラメータデコード (引数 `i` → `calldataload(4 + i*32)`) | ✅ |
 | ABI 戻り値エンコード (MSTORE 連続 + `return(0, M*32)`) | ✅ |
-| `if` 文 / 二項算術演算子 | ✅ |
-| テスト (7件通過 — Yul AST + 実バイトコード/セレクタ検証) | ✅ |
-| for/while/do-while 文 | ❌ |
-| 状態変数 SLOAD/SSTORE | ❌ |
-| `emit` / `revert` / コンストラクタ | ❌ |
-| 動的型 (string/bytes/動的配列) の ABI デコード/エンコード | ❌ |
+| `if` / `for` / `while` / `do-while` / `break` / `continue` 文 | ✅ |
+| 状態変数のスロット割当 + 読み (`sload`) / 書き (`sstore`) | ✅ |
+| 代入 (`=`) / 複合代入 (`+=` 等) / 前置・後置 `++`・`--` | ✅ |
+| 二項演算子 全対応 (`!=`/`<=`/`>=` は `iszero` 合成, シフトは引数順補正) | ✅ |
+| 単項演算子 (`!` / `~` / 単項 `-` / 単項 `+`) | ✅ |
+| テスト (7件 — Yul AST + 実バイトコード/セレクタ検証) | ✅ |
+| `emit` / `revert(reason)` / コンストラクタ本体 | ❌ |
+| 動的型 (string/bytes/動的配列/mapping) の ABI・ストレージ対応 | ❌ |
+| 符号付き整数の比較 (`slt`/`sgt`) / `&&`・`||` の短絡評価 | ❌ |
 
 ---
 
@@ -221,7 +227,7 @@
 | `CompilationResult` / `ContractOutput` データ構造 | ✅ |
 | standard-JSON 入出力インターフェース | ✅ |
 | `deployedBytecode` (ランタイム/デプロイ分離 — `generateDeployed`) | ✅ |
-| テスト (4件通過 — Adder の実バイトコード E2E 検証含む) | ✅ |
+| テスト (8件通過 — 最小EVMで実行し戻り値を検証: Adder/Counter/Loop/比較) | ✅ |
 | import 解決 (複数ファイル) / remapping 適用 | ❌ |
 | `settings.optimizer` フラグ | ❌ |
 
@@ -265,6 +271,13 @@
 | B-6 | `sol_codegen/ir_generator.dart` | `calldataload` オフセット固定値 `4` → 引数 `i` ごとに `4 + i*32` | 2026-06-18 |
 | B-14 | `sol_codegen/ir_generator.dart` | パラメータ/戻り値スロット名が本体参照 (`var_<name>`) と不一致でバイトコード生成が失敗 → スロット名を整合 | 2026-06-18 |
 | B-15 | `sol_yul/yul_codegen.dart` | `return(...)` が非 void 扱いで `RETURN` 後にデッドコード `POP` 混入 → void 集合に追加 | 2026-06-18 |
+| B-16 | `sol_evm/assembler.dart` | pass1 が JUMP を 3 バイトと誤計算 (実際は PUSH2+2+JUMP=4) → 全ジャンプ先がずれる | 2026-06-18 |
+| B-17 | `sol_evm/assembler.dart` | pass1 が `JUMPDEST` バイト(ラベル1バイト)を数えず、ラベル後のジャンプ先がずれる | 2026-06-18 |
+| B-18 | `sol_yul/yul_codegen.dart` | `let x := e` がフレームを二重 push しローカルの DUP 深さが破綻 → 匿名スロットをリネーム | 2026-06-18 |
+| B-19 | `sol_yul/yul_codegen.dart` | void 関数呼び出しが返り値 1 個を仮定し余分な POP でアンダーフロー → 返り値個数を記録 | 2026-06-18 |
+
+> B-16〜B-19 は「バイトコードを実際に EVM 実行する」テスト (`sol_driver/test/evm_exec_test.dart`) を
+> 追加して初めて顕在化した。生成物の構造検証だけでは捕捉できない実行時バグだった。
 
 ## 残存バグ（未修正）
 
@@ -286,8 +299,8 @@
 | sol_codegen | 7 | ✅ 全通過 |
 | sol_evm | 7 | ✅ 全通過 |
 | sol_yul | 17 | ✅ 全通過 |
-| sol_driver | 4 | ✅ 全通過 |
-| **合計** | **117** | **✅ 全通過** |
+| sol_driver | 8 | ✅ 全通過 (うち4件は最小EVMでの実行検証) |
+| **合計** | **121** | **✅ 全通過** |
 
 ---
 
@@ -327,15 +340,21 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 
 ## 第2マイルストーン以降（優先度順）
 
-| 優先度 | タスク |
-|---|---|
-| 高 | `sol_sema`: FunctionCall / MemberAccess の型解決 |
-| 高 | `sol_codegen`: for/while 文のコード生成 |
-| 高 | `sol_codegen`: 状態変数 SLOAD/SSTORE |
-| 中 | `sol_sema`: 型検査の全式対応 (FunctionCall, MemberAccess …) |
-| 中 | `sol_codegen`: emit / revert / コンストラクタ |
-| 中 | `sol_abi`: tuple エンコード / ABI デコード |
-| 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) |
-| 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) |
-| 低 | `sol_abi`: NatSpec / メタデータ JSON |
-| 低 | `sol_cli`: `--remappings` / `--base-path` |
+第2マイルストーンの一部（ループ・状態変数・代入・演算子）は完了し、値型のみの
+コントラクト（Counter / ループ集計 / 比較）が**実行可能なバイトコード**になることを
+最小EVMでの実行テストで確認済み。
+
+| 優先度 | タスク | 状態 |
+|---|---|---|
+| 高 | `sol_codegen`: for/while/do-while 文のコード生成 | ✅ |
+| 高 | `sol_codegen`: 状態変数 SLOAD/SSTORE + 代入 | ✅ |
+| 高 | `sol_sema`: FunctionCall / MemberAccess の型解決 | ❌ |
+| 中 | `sol_codegen`: emit / revert(reason) / コンストラクタ | ❌ |
+| 中 | `sol_codegen`: mapping / 配列 / struct のストレージレイアウト | ❌ |
+| 中 | `sol_codegen`: 符号付き比較 (slt/sgt) / `&&`・`||` の短絡評価 | ❌ |
+| 中 | `sol_sema`: 型検査の全式対応 (FunctionCall, MemberAccess …) | ❌ |
+| 中 | `sol_abi`: tuple エンコード / ABI デコード | ❌ |
+| 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) | ❌ |
+| 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) | ❌ |
+| 低 | `sol_abi`: NatSpec / メタデータ JSON | ❌ |
+| 低 | `sol_cli`: `--remappings` / `--base-path` | ❌ |

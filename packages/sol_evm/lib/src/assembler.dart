@@ -95,19 +95,21 @@ class Assembler {
 
   /// Two-pass assembly: first compute offsets, then emit bytes.
   Uint8List assemble() {
-    // Pass 1: compute label offsets assuming 3-byte PUSH2 for jumps.
+    // Pass 1: compute label offsets (jumps use a fixed 2-byte PUSH2 operand).
     final labelOffsets = <String, int>{};
     int offset = 0;
     for (final instr in _instructions) {
       switch (instr) {
         case LabelInstruction(:final name):
+          // The label resolves to the JUMPDEST byte emitted at this position.
           labelOffsets[name] = offset;
+          offset += 1; // JUMPDEST byte (emitted in pass 2)
         case SimpleInstruction(:final opcode):
           offset += opcode.totalBytes;
         case PushInstruction(:final data):
           offset += 1 + data.length; // PUSHn + n bytes
         case JumpInstruction():
-          offset += 3; // PUSH2 target + JUMP/JUMPI
+          offset += 4; // PUSH2 + 2 target bytes + JUMP/JUMPI
         case PushLabelInstruction():
           offset += 3; // PUSH2 label-offset
         case PushDeployedOffsetInstruction():
