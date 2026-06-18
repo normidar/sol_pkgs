@@ -1,0 +1,22 @@
+# melos_managed_dependency_overrides: sol_abi,sol_ast,sol_codegen,sol_evm,sol_lexer,sol_parser,sol_sema,sol_support,sol_types,sol_yul
+dependency_overrides:
+  sol_abi:
+    path: ../sol_abi
+  sol_ast:
+    path: ../sol_ast
+  sol_codegen:
+    path: ../sol_codegen
+  sol_evm:
+    path: ../sol_evm
+  sol_lexer:
+    path: ../sol_lexer
+  sol_parser:
+    path: ../sol_parser
+  sol_sema:
+    path: ../sol_sema
+  sol_support:
+    path: ../sol_support
+  sol_types:
+    path: ../sol_types
+  sol_yul:
+    path: ../sol_yul

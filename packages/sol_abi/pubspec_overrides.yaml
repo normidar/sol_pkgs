@@ -1,0 +1,8 @@
+# melos_managed_dependency_overrides: sol_ast,sol_support,sol_types
+dependency_overrides:
+  sol_ast:
+    path: ../sol_ast
+  sol_support:
+    path: ../sol_support
+  sol_types:
+    path: ../sol_types

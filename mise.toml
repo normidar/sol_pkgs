@@ -1,2 +1,9 @@
 [tools]
 dart = "3.12.2"
+
+[env]
+_.path = ["{{env.HOME}}/.pub-cache/bin"]
+
+[tasks.setup]
+description = "Install melos globally via dart pub"
+run = "dart pub global activate melos"
