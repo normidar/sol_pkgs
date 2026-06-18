@@ -31,3 +31,11 @@ scripts:
   lint:
     run: melos run analyze && melos run format
     description: Run analyze and format on all packages.
+
+  publish:dry-run:
+    run: melos publish --dry-run
+    description: Validate packages and check for any issues before publishing to pub.dev (does not actually upload).
+
+  publish:
+    run: melos publish
+    description: Publish all updated packages in the workspace to pub.dev.
