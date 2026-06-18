@@ -2,13 +2,13 @@ name: sol_types
 description: >
   Solidity type system for the sol_pkgs compiler.
   Defines the runtime type lattice, implicit/explicit conversions, and mutability.
-version: 0.1.0
+version: 0.1.0+1
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support: any
+  sol_support: ^0.1.0+1
 
 dev_dependencies:
   lints: ^4.0.0

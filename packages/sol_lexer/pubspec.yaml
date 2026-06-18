@@ -2,13 +2,13 @@ name: sol_lexer
 description: >
   Solidity tokeniser / scanner for the sol_pkgs compiler.
   Produces a stream of typed tokens from raw Solidity source text.
-version: 0.1.0
+version: 0.1.0+1
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support: any
+  sol_support: ^0.1.0+1
 
 dev_dependencies:
   lints: ^4.0.0

@@ -2,15 +2,15 @@ name: sol_parser
 description: >
   Recursive-descent Solidity parser for the sol_pkgs compiler.
   Converts a token stream into a typed AST.
-version: 0.1.0
+version: 0.1.0+1
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support: any
-  sol_lexer: any
-  sol_ast: any
+  sol_support: ^0.1.0+1
+  sol_lexer: ^0.1.0+1
+  sol_ast: ^0.1.0+1
 
 dev_dependencies:
   lints: ^4.0.0

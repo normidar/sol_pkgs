@@ -2,22 +2,22 @@ name: sol_driver
 description: >
   Compiler orchestration and standard-JSON I/O for the sol_pkgs Solidity compiler.
   Equivalent to solc's CompilerStack.
-version: 0.1.0
+version: 0.1.0+1
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support: any
-  sol_lexer: any
-  sol_ast: any
-  sol_parser: any
-  sol_types: any
-  sol_sema: any
-  sol_codegen: any
-  sol_evm: any
-  sol_yul: any
-  sol_abi: any
+  sol_support: ^0.1.0+1
+  sol_lexer: ^0.1.0+1
+  sol_ast: ^0.1.0+1
+  sol_parser: ^0.1.0+1
+  sol_types: ^0.1.0+1
+  sol_sema: ^0.1.0+1
+  sol_codegen: ^0.1.0+1
+  sol_evm: ^0.1.0+1
+  sol_yul: ^0.1.0+1
+  sol_abi: ^0.1.0+1
 
 dev_dependencies:
   lints: ^4.0.0
