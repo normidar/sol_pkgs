@@ -17,7 +17,9 @@ class YulPrinter {
         _indent++;
         _write('code ');
         _visit(code);
-        for (final sub in subObjects) _visit(sub);
+        for (final sub in subObjects) {
+          _visit(sub);
+        }
         _indent--;
         _write('}\n');
 

@@ -280,4 +280,143 @@ void main() {
       expect(bytes, contains(0x00)); // STOP
     });
   });
+
+  group('YulParser — blocks & expressions', () {
+    test('parses let with nested function call', () {
+      final block = YulParser('{ let x := add(1, mul(2, 3)) }').parseBlock();
+      expect(block.statements, hasLength(1));
+      final decl = block.statements.single as YulVariableDeclaration;
+      expect(decl.variables, ['x']);
+      final call = decl.value as YulFunctionCall;
+      expect(call.name, 'add');
+      expect(call.arguments, hasLength(2));
+      expect((call.arguments[0] as YulLiteral).value, '1');
+      expect((call.arguments[1] as YulFunctionCall).name, 'mul');
+    });
+
+    test('parses hex and decimal number literals', () {
+      final block = YulParser('{ let x := 0xff let y := 42 }').parseBlock();
+      expect((block.statements[0] as YulVariableDeclaration).variables, ['x']);
+      expect(
+        ((block.statements[0] as YulVariableDeclaration).value as YulLiteral)
+            .value,
+        '0xff',
+      );
+    });
+
+    test('distinguishes assignment from expression statement', () {
+      final block = YulParser('{ x := 1 sstore(0, 2) }').parseBlock();
+      expect(block.statements[0], isA<YulAssignment>());
+      expect(block.statements[1], isA<YulExpressionStatement>());
+    });
+
+    test('parses multi-value declaration and assignment', () {
+      final block = YulParser('{ let a, b := f() a, b := g() }').parseBlock();
+      expect((block.statements[0] as YulVariableDeclaration).variables, [
+        'a',
+        'b',
+      ]);
+      expect((block.statements[1] as YulAssignment).variables, ['a', 'b']);
+    });
+
+    test('ignores comments and type annotations', () {
+      final block = YulParser('''
+        {
+          // line comment
+          let x : u256 := 1 : u256 /* block */
+        }
+      ''').parseBlock();
+      expect((block.statements.single as YulVariableDeclaration).variables, [
+        'x',
+      ]);
+    });
+  });
+
+  group('YulParser — statements', () {
+    test('parses function definition with params and returns', () {
+      final block = YulParser(
+        '{ function double(n) -> r { r := add(n, n) } }',
+      ).parseBlock();
+      final fn = block.statements.single as YulFunctionDefinition;
+      expect(fn.name, 'double');
+      expect(fn.parameters, ['n']);
+      expect(fn.returnVariables, ['r']);
+      expect(fn.body.statements.single, isA<YulAssignment>());
+    });
+
+    test('parses if', () {
+      final block = YulParser('{ if lt(1, 2) { sstore(0, 1) } }').parseBlock();
+      final node = block.statements.single as YulIf;
+      expect((node.condition as YulFunctionCall).name, 'lt');
+    });
+
+    test('parses switch with cases and default', () {
+      final block = YulParser('''
+        { switch x
+          case 1 { sstore(0, 1) }
+          case 2 { sstore(0, 2) }
+          default { sstore(0, 0) } }
+      ''').parseBlock();
+      final node = block.statements.single as YulSwitch;
+      expect(node.cases, hasLength(2));
+      expect(node.cases[0].value.value, '1');
+      expect(node.defaultCase, isNotNull);
+    });
+
+    test('parses for loop with break/continue', () {
+      final block = YulParser('''
+        { for { let i := 0 } lt(i, 10) { i := add(i, 1) }
+          { if i { continue } break } }
+      ''').parseBlock();
+      final loop = block.statements.single as YulForLoop;
+      expect(loop.pre.statements.single, isA<YulVariableDeclaration>());
+      expect(loop.body.statements.last, isA<YulBreak>());
+    });
+
+    test('throws on malformed input', () {
+      expect(
+        () => YulParser('{ let := 1 }').parseBlock(),
+        throwsA(isA<YulParseException>()),
+      );
+    });
+  });
+
+  group('YulParser — objects', () {
+    test('parses an object with code and sub-object', () {
+      final obj = YulParser('''
+        object "Contract" {
+          code { mstore(0, 1) return(0, 32) }
+          object "Contract_deployed" {
+            code { stop() }
+          }
+          data "meta" hex"deadbeef"
+        }
+      ''').parseObject();
+      expect(obj.name, 'Contract');
+      expect(obj.code.statements, hasLength(2));
+      expect(obj.subObjects.single.name, 'Contract_deployed');
+      expect(obj.data['meta'], [0xde, 0xad, 0xbe, 0xef]);
+    });
+
+    test('parse() auto-detects object vs block', () {
+      expect(YulParser('object "O" { code {} }').parse(), isA<YulObject>());
+      expect(YulParser('{ stop() }').parse(), isA<YulBlock>());
+    });
+  });
+
+  group('YulParser ↔ codegen / printer round-trip', () {
+    test('parsed block compiles to bytecode', () {
+      final block = YulParser('{ let x := add(1, 2) }').parseBlock();
+      final bytes = YulCodeGenerator().generate(_obj(block));
+      expect(bytes, isNotEmpty);
+    });
+
+    test('printer output re-parses to an equivalent tree', () {
+      const src = '{ let x := add(1, 2) if x { sstore(0, x) } }';
+      final first = YulParser(src).parseBlock();
+      final printed = YulPrinter().print(first);
+      final second = YulParser(printed).parseBlock();
+      expect(YulPrinter().print(second), printed);
+    });
+  });
 }

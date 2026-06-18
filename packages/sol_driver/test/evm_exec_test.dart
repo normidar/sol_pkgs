@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_driver/sol_driver.dart';
 import 'package:sol_support/sol_support.dart';
+import 'package:sol_yul/sol_yul.dart';
 import 'package:test/test.dart';
 
 /// A deliberately small EVM interpreter — just enough opcodes to *execute* the
@@ -1008,6 +1009,83 @@ contract Main {
       expect(result.diagnostics.where((d) => d.isError), isEmpty);
       expect(result.contracts.containsKey('Lib'), isTrue);
       expect(result.contracts.containsKey('Main'), isTrue);
+    });
+  });
+
+  group('executes hand-written Yul (multi-return functions)', () {
+    // Parses Yul, compiles it to bytecode and runs it, asserting on storage.
+    MiniEvm runYul(String src) {
+      final block = YulParser(src).parseBlock();
+      final code = YulCodeGenerator().generate(YulObject('T', block, [], {}));
+      final evm = MiniEvm(code);
+      evm.call(Uint8List(0));
+      return evm;
+    }
+
+    test('2-return function preserves value order (identity)', () {
+      // x:=a, y:=b ⇒ p=3, q=4
+      final evm = runYul('''
+        {
+          function id2(a, b) -> x, y { x := a  y := b }
+          let p, q := id2(3, 4)
+          sstore(0, p)
+          sstore(1, q)
+        }
+      ''');
+      expect(evm.storage[BigInt.from(0)], BigInt.from(3));
+      expect(evm.storage[BigInt.from(1)], BigInt.from(4));
+    });
+
+    test('2-return function that swaps its arguments', () {
+      // x:=b, y:=a ⇒ p=9, q=7
+      final evm = runYul('''
+        {
+          function swap2(a, b) -> x, y { x := b  y := a }
+          let p, q := swap2(7, 9)
+          sstore(0, p)
+          sstore(1, q)
+        }
+      ''');
+      expect(evm.storage[BigInt.from(0)], BigInt.from(9));
+      expect(evm.storage[BigInt.from(1)], BigInt.from(7));
+    });
+
+    test('3-return function with computation', () {
+      // returns (a+b, mul(a,b), a) ⇒ (5, 6, 2)
+      final evm = runYul('''
+        {
+          function f(a, b) -> s, p, first {
+            s := add(a, b)
+            p := mul(a, b)
+            first := a
+          }
+          let x, y, z := f(2, 3)
+          sstore(0, x)
+          sstore(1, y)
+          sstore(2, z)
+        }
+      ''');
+      expect(evm.storage[BigInt.from(0)], BigInt.from(5));
+      expect(evm.storage[BigInt.from(1)], BigInt.from(6));
+      expect(evm.storage[BigInt.from(2)], BigInt.from(2));
+    });
+
+    test('multi-return with an early leave', () {
+      final evm = runYul('''
+        {
+          function pick(c) -> x, y {
+            x := 1
+            y := 2
+            if c { x := 100  y := 200  leave }
+            x := 9
+          }
+          let a, b := pick(1)
+          sstore(0, a)
+          sstore(1, b)
+        }
+      ''');
+      expect(evm.storage[BigInt.from(0)], BigInt.from(100));
+      expect(evm.storage[BigInt.from(1)], BigInt.from(200));
     });
   });
 }
