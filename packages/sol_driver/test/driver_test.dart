@@ -117,6 +117,57 @@ contract K {
     });
   });
 
+  group('ContractChecker in the pipeline', () {
+    List<Diagnostic> diagnose(String src, {String name = 'C'}) =>
+        (CompilerStack()..addSource('$name.sol', src)).compile().diagnostics;
+
+    test('reports a view function that writes state', () {
+      final diags = diagnose('''
+pragma solidity ^0.8.0;
+contract C {
+  uint256 count;
+  function f() public view returns (uint256) { count = 1; return count; }
+}
+''');
+      expect(diags.any((d) => d.isError && d.message.contains('view')), isTrue);
+    });
+
+    test('warns about an unused local variable', () {
+      final diags = diagnose('''
+pragma solidity ^0.8.0;
+contract C {
+  function f() public pure returns (uint256) {
+    uint256 unusedLocal = 1;
+    return 2;
+  }
+}
+''');
+      expect(
+        diags.any(
+          (d) =>
+              d.severity == Severity.warning &&
+              d.message.contains('unusedLocal'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('warns about a circular import', () {
+      final stack = CompilerStack()
+        ..addSource('A.sol', 'import "B.sol";\ncontract A {}')
+        ..addSource('B.sol', 'import "A.sol";\ncontract B {}');
+      final diags = stack.compile().diagnostics;
+      expect(
+        diags.any(
+          (d) =>
+              d.severity == Severity.warning &&
+              d.message.contains('Circular import'),
+        ),
+        isTrue,
+      );
+    });
+  });
+
   group('NatSpec / metadata end-to-end', () {
     const documented = '''
 // SPDX-License-Identifier: MIT

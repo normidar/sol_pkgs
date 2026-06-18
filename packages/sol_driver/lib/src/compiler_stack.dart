@@ -46,6 +46,7 @@ class CompilerStack {
 
       // Resolve imports: add transitively imported sources.
       _resolveImports(asts);
+      _reportImportCycles(asts);
 
       // Second pass: analyse and compile.
       for (final entry in asts.entries) {
@@ -116,10 +117,37 @@ class CompilerStack {
       if (!_diagnostics.hasErrors) {
         TypeChecker(_diagnostics).visitSourceFile(ast);
       }
+      // Static checks (mutability/visibility/override/unused) are independent
+      // of type inference, so run them regardless of earlier diagnostics.
+      ContractChecker(_diagnostics).check(ast);
     } on FatalErrorException {
       // already recorded
     }
   }
+
+  /// Solidity allows circular imports; we surface them as warnings so the cycle
+  /// is visible without failing the build.
+  void _reportImportCycles(Map<String, SourceFile> asts) {
+    final graph = ImportGraph();
+    for (final entry in asts.entries) {
+      graph.addImports(
+        entry.key,
+        entry.value.imports.map((i) => _unquote(i.path)),
+      );
+    }
+    for (final cycle in graph.findCycles()) {
+      _diagnostics.warning(
+        'Circular import detected: ${[...cycle, cycle.first].join(' -> ')}',
+      );
+    }
+  }
+
+  static String _unquote(String s) =>
+      (s.length >= 2 &&
+          (s.startsWith('"') || s.startsWith("'")) &&
+          (s.endsWith('"') || s.endsWith("'")))
+      ? s.substring(1, s.length - 1)
+      : s;
 
   ContractOutput? _compileContract(
     ContractDefinition contract, {

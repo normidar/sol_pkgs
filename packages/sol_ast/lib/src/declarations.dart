@@ -92,6 +92,7 @@ class FunctionDefinition extends AstNode {
     required this.overrideSpecifier,
     required this.modifiers,
     this.body,
+    this.isOverride = false,
   }) : super(location);
 
   final FunctionKind kind;
@@ -106,6 +107,9 @@ class FunctionDefinition extends AstNode {
 
   /// Contracts listed in `override(A, B)`, or `[]` for bare `override`.
   final List<String> overrideSpecifier;
+
+  /// Whether the `override` keyword is present (with or without a list).
+  final bool isOverride;
   final List<ModifierInvocation> modifiers;
 
   /// `null` for interface functions and abstract functions.

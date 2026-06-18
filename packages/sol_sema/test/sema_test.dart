@@ -527,4 +527,232 @@ void main() {
       expect(lengthAccess.annotation, equals(uint256Type));
     });
   });
+
+  group('ContractChecker — state mutability', () {
+    StateVariableDeclaration stateVar(String name) => StateVariableDeclaration(
+      _loc(),
+      ElementaryTypeName(_loc(), 'uint256', intWidth: 256),
+      name,
+      Visibility.internal,
+      VariableMutability.mutable,
+      null,
+    );
+
+    FunctionDefinition fnMut(String name, StateMutability mut, Block body) =>
+        FunctionDefinition(
+          location: _loc(),
+          kind: FunctionKind.function,
+          name: name,
+          parameters: [],
+          returnParameters: [_param('', 'uint256')],
+          visibility: Visibility.public,
+          stateMutability: mut,
+          isVirtual: false,
+          overrideSpecifier: [],
+          modifiers: [],
+          body: body,
+        );
+
+    test('view function that writes state errors', () {
+      final body = _block([
+        ExpressionStatement(
+          _loc(),
+          Assignment(_loc(), '=', _id('count'), _lit('1')),
+        ),
+      ]);
+      final file = _sourceFile([
+        _contract('C', [
+          stateVar('count'),
+          fnMut('f', StateMutability.view, body),
+        ]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      expect(
+        diags.diagnostics.any((d) => d.isError && d.message.contains('view')),
+        isTrue,
+      );
+    });
+
+    test('view function that only reads state is fine', () {
+      final body = _block([ReturnStatement(_loc(), _id('count'))]);
+      final file = _sourceFile([
+        _contract('C', [
+          stateVar('count'),
+          fnMut('f', StateMutability.view, body),
+        ]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      expect(diags.diagnostics.where((d) => d.isError), isEmpty);
+    });
+
+    test('pure function that reads state errors', () {
+      final body = _block([ReturnStatement(_loc(), _id('count'))]);
+      final file = _sourceFile([
+        _contract('C', [
+          stateVar('count'),
+          fnMut('f', StateMutability.pure, body),
+        ]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      expect(
+        diags.diagnostics.any((d) => d.isError && d.message.contains('pure')),
+        isTrue,
+      );
+    });
+
+    test('pure function over only locals is fine', () {
+      final body = _block([
+        _varDecl('x', 'uint256', _lit('1')),
+        ReturnStatement(_loc(), _id('x')),
+      ]);
+      final file = _sourceFile([
+        _contract('C', [
+          stateVar('count'),
+          fnMut('f', StateMutability.pure, body),
+        ]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      expect(diags.diagnostics.where((d) => d.isError), isEmpty);
+    });
+  });
+
+  group('ContractChecker — visibility & override', () {
+    FunctionDefinition rawFn(
+      String name, {
+      Visibility visibility = Visibility.public,
+      bool isVirtual = false,
+      bool isOverride = false,
+    }) => FunctionDefinition(
+      location: _loc(),
+      kind: FunctionKind.function,
+      name: name,
+      parameters: [],
+      returnParameters: [],
+      visibility: visibility,
+      stateMutability: StateMutability.nonpayable,
+      isVirtual: isVirtual,
+      overrideSpecifier: [],
+      isOverride: isOverride,
+      modifiers: [],
+      body: _block([]),
+    );
+
+    test('missing visibility errors', () {
+      final file = _sourceFile([
+        _contract('C', [rawFn('f', visibility: Visibility.defaultVisibility)]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      expect(
+        diags.diagnostics.any(
+          (d) => d.isError && d.message.contains('visibility'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('override with no base errors', () {
+      final file = _sourceFile([
+        _contract('C', [rawFn('f', isOverride: true)]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      expect(
+        diags.diagnostics.any(
+          (d) => d.isError && d.message.contains('does not override'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('missing override on a virtual base function errors', () {
+      final base = _contract('Base', [rawFn('f', isVirtual: true)]);
+      final derived = ContractDefinition(
+        _loc(),
+        ContractKind.contract,
+        'D',
+        [InheritanceSpecifier(_loc(), 'Base', [])],
+        [rawFn('f')],
+      );
+      final diags = _newDiags();
+      ContractChecker(diags).check(_sourceFile([base, derived]));
+      expect(
+        diags.diagnostics.any(
+          (d) => d.isError && d.message.contains('must specify "override"'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('correct override is fine', () {
+      final base = _contract('Base', [rawFn('f', isVirtual: true)]);
+      final derived = ContractDefinition(
+        _loc(),
+        ContractKind.contract,
+        'D',
+        [InheritanceSpecifier(_loc(), 'Base', [])],
+        [rawFn('f', isOverride: true)],
+      );
+      final diags = _newDiags();
+      ContractChecker(diags).check(_sourceFile([base, derived]));
+      expect(diags.diagnostics.where((d) => d.isError), isEmpty);
+    });
+  });
+
+  group('ContractChecker — unused locals', () {
+    test('warns about an unused local', () {
+      final body = _block([
+        _varDecl('unused', 'uint256', _lit('1')),
+        _varDecl('used', 'uint256', _lit('2')),
+        ReturnStatement(_loc(), _id('used')),
+      ]);
+      final file = _sourceFile([
+        _contract('C', [
+          _fn('f', returns: [_param('', 'uint256')], body: body),
+        ]),
+      ]);
+      final diags = _newDiags();
+      ContractChecker(diags).check(file);
+      final warnings = diags.diagnostics.where(
+        (d) => d.severity == Severity.warning,
+      );
+      expect(warnings, hasLength(1));
+      expect(warnings.first.message, contains('unused'));
+    });
+  });
+
+  group('ImportGraph', () {
+    test('acyclic graph has no cycle', () {
+      final g = ImportGraph()
+        ..addImports('a.sol', ['b.sol'])
+        ..addImports('b.sol', ['c.sol']);
+      expect(g.hasCycle, isFalse);
+      expect(g.findCycles(), isEmpty);
+    });
+
+    test('detects a direct cycle', () {
+      final g = ImportGraph()
+        ..addImports('a.sol', ['b.sol'])
+        ..addImports('b.sol', ['a.sol']);
+      expect(g.hasCycle, isTrue);
+      expect(g.findCycles().single, containsAll(['a.sol', 'b.sol']));
+    });
+
+    test('detects a self import', () {
+      final g = ImportGraph()..addImports('a.sol', ['a.sol']);
+      expect(g.hasCycle, isTrue);
+    });
+
+    test('detects a longer cycle', () {
+      final g = ImportGraph()
+        ..addImports('a.sol', ['b.sol'])
+        ..addImports('b.sol', ['c.sol'])
+        ..addImports('c.sol', ['a.sol']);
+      expect(g.findCycles().single, containsAll(['a.sol', 'b.sol', 'c.sol']));
+    });
+  });
 }

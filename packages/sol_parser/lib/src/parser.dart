@@ -275,6 +275,7 @@ class Parser {
     var visibility = Visibility.defaultVisibility;
     var mutability = StateMutability.nonpayable;
     var isVirtual = false;
+    var isOverride = false;
     final overrides = <String>[];
     final modifiers = <ModifierInvocation>[];
 
@@ -307,6 +308,7 @@ class Parser {
           _advance();
         case TokenKind.kOverride:
           _advance();
+          isOverride = true;
           if (_tryConsume(TokenKind.LParen)) {
             overrides.add(_ident());
             while (_tryConsume(TokenKind.Comma)) overrides.add(_ident());
@@ -356,6 +358,7 @@ class Parser {
       stateMutability: mutability,
       isVirtual: isVirtual,
       overrideSpecifier: overrides,
+      isOverride: isOverride,
       modifiers: modifiers,
       body: body,
     );
