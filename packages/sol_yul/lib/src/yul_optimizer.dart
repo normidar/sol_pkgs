@@ -136,17 +136,21 @@ class YulOptimizer {
       case 'mul':
         if (bv == BigInt.one) return a;
         if (av == BigInt.one) return b;
-        if (bv == BigInt.zero && _isSideEffectFree(a))
+        if (bv == BigInt.zero && _isSideEffectFree(a)) {
           return _numLiteral(BigInt.zero);
-        if (av == BigInt.zero && _isSideEffectFree(b))
+        }
+        if (av == BigInt.zero && _isSideEffectFree(b)) {
           return _numLiteral(BigInt.zero);
+        }
       case 'div':
         if (bv == BigInt.one) return a;
       case 'and':
-        if (bv == BigInt.zero && _isSideEffectFree(a))
+        if (bv == BigInt.zero && _isSideEffectFree(a)) {
           return _numLiteral(BigInt.zero);
-        if (av == BigInt.zero && _isSideEffectFree(b))
+        }
+        if (av == BigInt.zero && _isSideEffectFree(b)) {
           return _numLiteral(BigInt.zero);
+        }
         if (bv == _mask) return a;
         if (av == _mask) return b;
       case 'shl':
