@@ -3,7 +3,6 @@ description: >
   Foundation library for the sol_pkgs Solidity compiler.
   Provides source locations, diagnostic collection, and import remapping.
 version: 0.1.0
-publish_to: none
 
 environment:
   sdk: ">=3.12.0 <4.0.0"

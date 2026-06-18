@@ -2,14 +2,12 @@ name: sol_yul
 description: >
   Yul intermediate representation, optimiser, and EVM dialect for the sol_pkgs compiler.
 version: 0.1.0
-publish_to: none
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support:
-    path: ../sol_support
+  sol_support: any
   sol_evm:
     path: ../sol_evm
 

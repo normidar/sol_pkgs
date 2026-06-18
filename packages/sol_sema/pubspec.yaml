@@ -3,18 +3,14 @@ description: >
   Semantic analysis for the sol_pkgs Solidity compiler.
   Name resolution, scope management, C3 inheritance linearisation, and type checking.
 version: 0.1.0
-publish_to: none
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support:
-    path: ../sol_support
-  sol_ast:
-    path: ../sol_ast
-  sol_types:
-    path: ../sol_types
+  sol_support: any
+  sol_ast: any
+  sol_types: any
 
 dev_dependencies:
   lints: ^4.0.0

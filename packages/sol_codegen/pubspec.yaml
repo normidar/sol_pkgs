@@ -2,22 +2,16 @@ name: sol_codegen
 description: >
   Lowers semantically-analysed Solidity AST to Yul IR for the sol_pkgs compiler.
 version: 0.1.0
-publish_to: none
 
 environment:
   sdk: ">=3.12.0 <4.0.0"
 
 dependencies:
-  sol_support:
-    path: ../sol_support
-  sol_ast:
-    path: ../sol_ast
-  sol_types:
-    path: ../sol_types
-  sol_yul:
-    path: ../sol_yul
-  sol_abi:
-    path: ../sol_abi
+  sol_support: any
+  sol_ast: any
+  sol_types: any
+  sol_yul: any
+  sol_abi: any
 
 dev_dependencies:
   lints: ^4.0.0
