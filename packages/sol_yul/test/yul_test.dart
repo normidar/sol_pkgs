@@ -404,6 +404,128 @@ void main() {
     });
   });
 
+  group('YulOptimizer — constant folding', () {
+    // Fold inside an `sstore` so the value is "used" and survives DCE.
+    String opt(String src) => YulPrinter().print(
+      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('folds nested arithmetic', () {
+      // add(2, mul(3, 4)) == 14
+      expect(
+        opt('{ sstore(0, add(2, mul(3, 4))) }'),
+        contains('sstore(0, 14)'),
+      );
+    });
+
+    test('folds comparisons to 0/1', () {
+      expect(opt('{ sstore(0, lt(1, 2)) }'), contains('sstore(0, 1)'));
+      expect(opt('{ sstore(0, gt(1, 2)) }'), contains('sstore(0, 0)'));
+      expect(opt('{ sstore(0, eq(5, 5)) }'), contains('sstore(0, 1)'));
+    });
+
+    test('folds with 256-bit wraparound on sub', () {
+      // sub(0, 1) == 2**256 - 1
+      final maxWord = ((BigInt.one << 256) - BigInt.one).toString();
+      expect(opt('{ sstore(0, sub(0, 1)) }'), contains('sstore(0, $maxWord)'));
+    });
+
+    test('folds bitwise and shifts', () {
+      expect(opt('{ sstore(0, shl(4, 1)) }'), contains('sstore(0, 16)'));
+      expect(opt('{ sstore(0, and(12, 10)) }'), contains('sstore(0, 8)'));
+    });
+
+    test('folds signed division', () {
+      // sdiv(sub(0,6), 2) == -3 (as 2**256-3)
+      final minus3 = ((BigInt.one << 256) - BigInt.from(3)).toString();
+      expect(opt('{ sstore(0, sdiv(sub(0, 6), 2)) }'), contains(minus3));
+    });
+  });
+
+  group('YulOptimizer — algebraic simplification', () {
+    String opt(String src) => YulPrinter().print(
+      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('add(x, 0) -> x', () {
+      expect(
+        opt('{ let y := 5 sstore(0, add(y, 0)) }'),
+        contains('sstore(0, y)'),
+      );
+    });
+
+    test('mul(x, 1) -> x', () {
+      expect(
+        opt('{ let y := 5 sstore(0, mul(y, 1)) }'),
+        contains('sstore(0, y)'),
+      );
+    });
+
+    test('mul(x, 0) -> 0 when side-effect-free', () {
+      expect(
+        opt('{ let y := 5 sstore(0, mul(y, 0)) }'),
+        contains('sstore(0, 0)'),
+      );
+    });
+
+    test('does not drop a side-effecting operand in mul(_, 0)', () {
+      // sstore is not pure, so mul(sstore(...), 0) must keep the call.
+      final out = opt('{ sstore(0, mul(sstore(1, 2), 0)) }');
+      expect(out, contains('sstore(1, 2)'));
+    });
+  });
+
+  group('YulOptimizer — dead-code elimination', () {
+    String opt(String src) => YulPrinter().print(
+      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('drops an unused side-effect-free binding', () {
+      final out = opt('{ let unused := add(1, 2) sstore(0, 1) }');
+      expect(out, isNot(contains('unused')));
+      expect(out, contains('sstore(0, 1)'));
+    });
+
+    test('keeps a used binding', () {
+      final out = opt('{ let x := 7 sstore(0, x) }');
+      expect(out, contains('let x := 7'));
+    });
+
+    test('keeps the side effect of an unused but impure binding', () {
+      final out = opt('{ let x := sload(0) let y := sstore(1, 2) }');
+      // y is unused; sstore must survive as a bare expression statement.
+      expect(out, contains('sstore(1, 2)'));
+      expect(out, isNot(contains('let y')));
+    });
+
+    test('removes statements after a terminator', () {
+      final out = opt('{ return(0, 32) let dead := 1 sstore(0, dead) }');
+      expect(out, contains('return(0, 32)'));
+      expect(out, isNot(contains('dead')));
+    });
+  });
+
+  group('YulOptimizer — preserves behaviour', () {
+    test('optimised object still produces bytecode', () {
+      final obj =
+          YulParser('''
+        object "C" {
+          code {
+            let x := add(mul(2, 3), 0)
+            let junk := 99
+            sstore(0, x)
+          }
+        }
+      ''').parse()
+              as YulObject;
+      final optimised = const YulOptimizer().optimize(obj);
+      final bytes = YulCodeGenerator().generate(optimised);
+      expect(bytes, isNotEmpty);
+      // The dead `junk` binding is gone, so PUSH1 99 (0x63) should not appear.
+      expect(bytes, isNot(contains(99)));
+    });
+  });
+
   group('YulParser ↔ codegen / printer round-trip', () {
     test('parsed block compiles to bytecode', () {
       final block = YulParser('{ let x := add(1, 2) }').parseBlock();

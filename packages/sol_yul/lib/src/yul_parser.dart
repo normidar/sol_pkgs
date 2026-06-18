@@ -375,8 +375,9 @@ class _YulLexer {
       _i += 3;
       return _Token(_TokenKind.hexString, _readQuoted(), start);
     }
-    if (c == '"' || c == "'")
+    if (c == '"' || c == "'") {
       return _Token(_TokenKind.string, _readQuoted(), start);
+    }
 
     if (_isDigit(c)) return _Token(_TokenKind.number, _readNumber(), start);
 
