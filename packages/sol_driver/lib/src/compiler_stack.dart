@@ -17,6 +17,13 @@ import 'compilation_result.dart';
 ///   ..compile();
 /// ```
 class CompilerStack {
+  CompilerStack({this.optimize = false});
+
+  /// When true, the generated Yul IR is run through [YulOptimizer] before
+  /// bytecode generation (constant folding, simplification, dead-code
+  /// elimination). Mirrors solc's `settings.optimizer.enabled`.
+  final bool optimize;
+
   final SourceUnitRegistry _registry = SourceUnitRegistry();
   final DiagnosticCollector _diagnostics = DiagnosticCollector();
   final Map<String, String> _sources = {};
@@ -112,7 +119,10 @@ class CompilerStack {
 
   ContractOutput? _compileContract(ContractDefinition contract) {
     try {
-      final yulObj = IRGenerator(_diagnostics).generateContract(contract);
+      var yulObj = IRGenerator(_diagnostics).generateContract(contract);
+      if (optimize) {
+        yulObj = const YulOptimizer().optimize(yulObj);
+      }
       final yulIr = YulPrinter().print(yulObj);
       final bytecode = YulCodeGenerator().generate(yulObj);
       final deployedBytecode = YulCodeGenerator().generateDeployed(yulObj);

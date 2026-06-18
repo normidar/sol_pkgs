@@ -173,12 +173,39 @@ class YulOptimizer {
 
   YulBlock _dceBlock(YulBlock block, Set<String> reads, Set<String> assigns) {
     final out = <YulStatement>[];
+    var terminated = false;
     for (final s in block.statements) {
+      // Statements after an unconditional terminator are unreachable —
+      // EXCEPT function definitions (and statements containing them), which
+      // are hoisted and reached via jumps, not fall-through. Dropping a
+      // hoisted function would leave dangling jumps.
+      if (terminated && !_hasFunctionDef(s)) continue;
       final stmt = _dceStatement(s, reads, assigns);
       if (stmt != null) out.add(stmt);
-      if (_isTerminator(s)) break; // statements after this are unreachable
+      if (!terminated && _isTerminator(s)) terminated = true;
     }
     return YulBlock(out);
+  }
+
+  /// Whether [node] contains a (possibly nested) function definition.
+  static bool _hasFunctionDef(YulNode node) {
+    switch (node) {
+      case YulFunctionDefinition():
+        return true;
+      case YulBlock(:final statements):
+        return statements.any(_hasFunctionDef);
+      case YulIf(:final body):
+        return _hasFunctionDef(body);
+      case YulForLoop(:final pre, :final post, :final body):
+        return _hasFunctionDef(pre) ||
+            _hasFunctionDef(post) ||
+            _hasFunctionDef(body);
+      case YulSwitch(:final cases, :final defaultCase):
+        return cases.any((c) => _hasFunctionDef(c.body)) ||
+            (defaultCase != null && _hasFunctionDef(defaultCase));
+      default:
+        return false;
+    }
   }
 
   YulStatement? _dceStatement(

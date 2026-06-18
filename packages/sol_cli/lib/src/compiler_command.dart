@@ -15,7 +15,7 @@ int runCompiler(List<String> args) {
       'standard-json',
       help: 'Read standard-JSON from stdin, write to stdout.',
     )
-    ..addFlag('optimize', help: 'Enable Yul optimizer (not yet implemented).')
+    ..addFlag('optimize', help: 'Enable the Yul optimizer.')
     ..addMultiOption(
       'remappings',
       help: 'Import remappings (context:prefix=target).',
@@ -65,8 +65,9 @@ int runCompiler(List<String> args) {
   final showBin = parsed['bin'] as bool;
   final showAbi = parsed['abi'] as bool;
   final showIr = parsed['ir'] as bool;
+  final optimize = parsed['optimize'] as bool;
 
-  final stack = CompilerStack();
+  final stack = CompilerStack(optimize: optimize);
   for (final path in files) {
     final file = File(path);
     if (!file.existsSync()) {

@@ -79,6 +79,44 @@ void main() {
     });
   });
 
+  group('CompilerStack optimizer', () {
+    const constSource = '''
+pragma solidity ^0.8.0;
+contract K {
+  function val() public pure returns (uint256) {
+    unchecked { return 2 + 3 * 4; }
+  }
+}
+''';
+
+    test('folds constant arithmetic and shrinks bytecode', () {
+      final plain = (CompilerStack()..addSource('K.sol', constSource))
+          .compile()
+          .contracts['K']!;
+      final optimised = (CompilerStack(
+        optimize: true,
+      )..addSource('K.sol', constSource)).compile().contracts['K']!;
+
+      // Unoptimised IR still has the multiplication; optimised folds it to 14.
+      expect(plain.yulIr, contains('mul('));
+      expect(optimised.yulIr, isNot(contains('mul(')));
+      expect(optimised.yulIr, contains('14'));
+      // Folding + DCE never make the runtime code larger.
+      expect(
+        optimised.deployedBytecode.length,
+        lessThan(plain.deployedBytecode.length),
+      );
+    });
+
+    test('optimising Adder produces no errors', () {
+      final result = (CompilerStack(
+        optimize: true,
+      )..addSource('Adder.sol', _adderSource)).compile();
+      expect(result.diagnostics.where((d) => d.isError), isEmpty);
+      expect(result.contracts['Adder']!.deployedBytecode, isNotEmpty);
+    });
+  });
+
   group('StandardJson', () {
     test('round-trips standard-json format', () {
       final input = jsonEncode({
@@ -97,6 +135,44 @@ void main() {
       final output = StandardJson().compile(input);
       final decoded = jsonDecode(output) as Map<String, dynamic>;
       expect(decoded.containsKey('contracts'), isTrue);
+    });
+
+    test('honours settings.optimizer.enabled', () {
+      Map<String, dynamic> compileWith(bool enabled) {
+        final input = jsonEncode({
+          'language': 'Solidity',
+          'sources': {
+            'K.sol': {
+              'content': '''
+pragma solidity ^0.8.0;
+contract K {
+  function val() public pure returns (uint256) {
+    unchecked { return 2 + 3 * 4; }
+  }
+}
+''',
+            },
+          },
+          'settings': {
+            'optimizer': {'enabled': enabled},
+            'outputSelection': {
+              '*': {
+                '*': ['evm.bytecode', 'ir'],
+              },
+            },
+          },
+        });
+        return jsonDecode(StandardJson().compile(input))
+            as Map<String, dynamic>;
+      }
+
+      final off = compileWith(false);
+      final on = compileWith(true);
+      // _buildOutput keys contracts by contract name: contracts[K][K].
+      final irOff = off['contracts']['K']['K']['ir'] as String;
+      final irOn = on['contracts']['K']['K']['ir'] as String;
+      expect(irOff, contains('mul('));
+      expect(irOn, isNot(contains('mul(')));
     });
   });
 }

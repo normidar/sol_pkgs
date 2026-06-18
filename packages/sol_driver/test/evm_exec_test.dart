@@ -339,12 +339,18 @@ BigInt _asInt(Uint8List? data) {
 ///
 /// Throws (rather than using `expect`) on any compile error so it can also be
 /// called at `group` body level, not only inside a `test`.
-Uint8List _runtimeOf(String source, String name) {
-  return _contractOf(source, name).deployedBytecode;
+Uint8List _runtimeOf(String source, String name, {bool optimize = false}) {
+  return _contractOf(source, name, optimize: optimize).deployedBytecode;
 }
 
-ContractOutput _contractOf(String source, String name) {
-  final result = (CompilerStack()..addSource('$name.sol', source)).compile();
+ContractOutput _contractOf(
+  String source,
+  String name, {
+  bool optimize = false,
+}) {
+  final result = (CompilerStack(
+    optimize: optimize,
+  )..addSource('$name.sol', source)).compile();
   final errors = result.diagnostics.where((d) => d.isError);
   if (errors.isNotEmpty) {
     throw StateError(
@@ -1009,6 +1015,44 @@ contract Main {
       expect(result.diagnostics.where((d) => d.isError), isEmpty);
       expect(result.contracts.containsKey('Lib'), isTrue);
       expect(result.contracts.containsKey('Main'), isTrue);
+    });
+  });
+
+  group('optimised bytecode keeps the same behaviour', () {
+    test('Adder.getSum(2, 3) == 5 with --optimize', () {
+      final code = _runtimeOf(
+        '''
+pragma solidity ^0.8.0;
+contract Adder {
+  function getSum(uint256 a, uint256 b) public pure returns (uint256) {
+    return a + b;
+  }
+}
+''',
+        'Adder',
+        optimize: true,
+      );
+      final out = MiniEvm(
+        code,
+      ).call(_calldata('getSum(uint256,uint256)', [2, 3]));
+      expect(_asUint(out), BigInt.from(5));
+    });
+
+    test('folded constant function returns 14 with --optimize', () {
+      final code = _runtimeOf(
+        '''
+pragma solidity ^0.8.0;
+contract K {
+  function val() public pure returns (uint256) {
+    unchecked { return 2 + 3 * 4; }
+  }
+}
+''',
+        'K',
+        optimize: true,
+      );
+      final out = MiniEvm(code).call(_calldata('val()', []));
+      expect(_asUint(out), BigInt.from(14));
     });
   });
 
