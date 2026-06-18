@@ -2,11 +2,8 @@ import 'source_location.dart';
 
 /// Represents a single Solidity source file tracked by the compiler.
 class SourceUnit {
-  SourceUnit({
-    required this.index,
-    required this.path,
-    required this.source,
-  }) : sourceMap = SourceMap(source);
+  SourceUnit({required this.index, required this.path, required this.source})
+    : sourceMap = SourceMap(source);
 
   final int index;
   final String path;

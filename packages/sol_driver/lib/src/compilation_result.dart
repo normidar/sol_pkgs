@@ -21,10 +21,7 @@ class ContractOutput {
 }
 
 class CompilationResult {
-  CompilationResult({
-    required this.diagnostics,
-    required this.contracts,
-  });
+  CompilationResult({required this.diagnostics, required this.contracts});
 
   final List<Diagnostic> diagnostics;
   final Map<String, ContractOutput> contracts; // contract name → output

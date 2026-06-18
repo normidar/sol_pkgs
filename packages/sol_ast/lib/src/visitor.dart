@@ -66,7 +66,8 @@ abstract class AstVisitor {
   }
 
   void visitUserDefinedValueTypeDefinition(
-      UserDefinedValueTypeDefinition node) {
+    UserDefinedValueTypeDefinition node,
+  ) {
     node.underlyingType.accept(this);
   }
 
@@ -139,8 +140,7 @@ abstract class AstVisitor {
     node.expression.accept(this);
   }
 
-  void visitVariableDeclarationStatement(
-      VariableDeclarationStatement node) {
+  void visitVariableDeclarationStatement(VariableDeclarationStatement node) {
     for (final d in node.declarations) d?.accept(this);
     node.initialValue?.accept(this);
   }

@@ -26,7 +26,10 @@ class MiniEvm {
   final Map<BigInt, BigInt> storage = {};
 
   /// `msg.sender` returned by CALLER (overridable per test).
-  BigInt caller = BigInt.parse('00000000000000000000000000000000000000aa', radix: 16);
+  BigInt caller = BigInt.parse(
+    '00000000000000000000000000000000000000aa',
+    radix: 16,
+  );
 
   /// Emitted logs: each is (topics, data).
   final List<({List<BigInt> topics, Uint8List data})> logs = [];
@@ -52,11 +55,13 @@ class MiniEvm {
 
     void storeWord(int offset, BigInt value) {
       for (var i = 0; i < 32; i++) {
-        memory[offset + i] = ((value >> (8 * (31 - i))) & BigInt.from(0xff)).toInt();
+        memory[offset + i] = ((value >> (8 * (31 - i))) & BigInt.from(0xff))
+            .toInt();
       }
     }
 
-    int calldataByte(int i) => (i >= 0 && i < calldata.length) ? calldata[i] : 0;
+    int calldataByte(int i) =>
+        (i >= 0 && i < calldata.length) ? calldata[i] : 0;
     int memByte(int i) => memory[i] ?? 0;
 
     while (pc < code.length) {
@@ -64,99 +69,188 @@ class MiniEvm {
       switch (op) {
         case 0x00: // STOP
           return Uint8List(0);
-        case 0x01: push(pop() + pop()); pc++; // ADD
-        case 0x02: push(pop() * pop()); pc++; // MUL
-        case 0x03: final a = pop(); final b = pop(); push(a - b); pc++; // SUB
+        case 0x01:
+          push(pop() + pop());
+          pc++; // ADD
+        case 0x02:
+          push(pop() * pop());
+          pc++; // MUL
+        case 0x03:
+          final a = pop();
+          final b = pop();
+          push(a - b);
+          pc++; // SUB
         case 0x04: // DIV
-          final a = pop(); final b = pop();
-          push(b == BigInt.zero ? BigInt.zero : a ~/ b); pc++;
+          final a = pop();
+          final b = pop();
+          push(b == BigInt.zero ? BigInt.zero : a ~/ b);
+          pc++;
         case 0x05: // SDIV
-          final a = _toSigned(pop()); final b = _toSigned(pop());
-          push(b == BigInt.zero ? BigInt.zero : a ~/ b); pc++;
+          final a = _toSigned(pop());
+          final b = _toSigned(pop());
+          push(b == BigInt.zero ? BigInt.zero : a ~/ b);
+          pc++;
         case 0x06: // MOD
-          final a = pop(); final b = pop();
-          push(b == BigInt.zero ? BigInt.zero : a % b); pc++;
+          final a = pop();
+          final b = pop();
+          push(b == BigInt.zero ? BigInt.zero : a % b);
+          pc++;
         case 0x07: // SMOD
-          final a = _toSigned(pop()); final b = _toSigned(pop());
-          push(b == BigInt.zero ? BigInt.zero : a.remainder(b)); pc++;
+          final a = _toSigned(pop());
+          final b = _toSigned(pop());
+          push(b == BigInt.zero ? BigInt.zero : a.remainder(b));
+          pc++;
         case 0x0a: // EXP
-          final a = pop(); final b = pop();
-          push(a.modPow(b, BigInt.one << 256)); pc++;
+          final a = pop();
+          final b = pop();
+          push(a.modPow(b, BigInt.one << 256));
+          pc++;
         case 0x0b: // SIGNEXTEND
-          final b = pop(); final x = pop();
+          final b = pop();
+          final x = pop();
           if (b >= BigInt.from(32)) {
             push(x);
           } else {
             final bit = b.toInt() * 8 + 7;
             final mask = (BigInt.one << (bit + 1)) - BigInt.one;
-            push(((x >> bit) & BigInt.one) == BigInt.one ? x | ~mask : x & mask);
+            push(
+              ((x >> bit) & BigInt.one) == BigInt.one ? x | ~mask : x & mask,
+            );
           }
           pc++;
         case 0x20: // KECCAK256(offset, len)
-          final off = pop().toInt(); final len = pop().toInt();
+          final off = pop().toInt();
+          final len = pop().toInt();
           final bytes = [for (var i = 0; i < len; i++) memByte(off + i)];
           var h = BigInt.zero;
           for (final b in keccak256(bytes)) h = (h << 8) | BigInt.from(b);
-          push(h); pc++;
-        case 0x10: final a = pop(); final b = pop(); push(a < b ? BigInt.one : BigInt.zero); pc++; // LT
-        case 0x11: final a = pop(); final b = pop(); push(a > b ? BigInt.one : BigInt.zero); pc++; // GT
+          push(h);
+          pc++;
+        case 0x10:
+          final a = pop();
+          final b = pop();
+          push(a < b ? BigInt.one : BigInt.zero);
+          pc++; // LT
+        case 0x11:
+          final a = pop();
+          final b = pop();
+          push(a > b ? BigInt.one : BigInt.zero);
+          pc++; // GT
         case 0x12: // SLT
-          final a = _toSigned(pop()); final b = _toSigned(pop());
-          push(a < b ? BigInt.one : BigInt.zero); pc++;
+          final a = _toSigned(pop());
+          final b = _toSigned(pop());
+          push(a < b ? BigInt.one : BigInt.zero);
+          pc++;
         case 0x13: // SGT
-          final a = _toSigned(pop()); final b = _toSigned(pop());
-          push(a > b ? BigInt.one : BigInt.zero); pc++;
-        case 0x14: push(pop() == pop() ? BigInt.one : BigInt.zero); pc++; // EQ
-        case 0x15: push(pop() == BigInt.zero ? BigInt.one : BigInt.zero); pc++; // ISZERO
-        case 0x16: push(pop() & pop()); pc++; // AND
-        case 0x17: push(pop() | pop()); pc++; // OR
-        case 0x18: push(pop() ^ pop()); pc++; // XOR
-        case 0x19: push(~pop()); pc++; // NOT
+          final a = _toSigned(pop());
+          final b = _toSigned(pop());
+          push(a > b ? BigInt.one : BigInt.zero);
+          pc++;
+        case 0x14:
+          push(pop() == pop() ? BigInt.one : BigInt.zero);
+          pc++; // EQ
+        case 0x15:
+          push(pop() == BigInt.zero ? BigInt.one : BigInt.zero);
+          pc++; // ISZERO
+        case 0x16:
+          push(pop() & pop());
+          pc++; // AND
+        case 0x17:
+          push(pop() | pop());
+          pc++; // OR
+        case 0x18:
+          push(pop() ^ pop());
+          pc++; // XOR
+        case 0x19:
+          push(~pop());
+          pc++; // NOT
         case 0x1b: // SHL(shift, value)
-          final shift = pop(); final value = pop();
-          push(shift >= BigInt.from(256) ? BigInt.zero : value << shift.toInt()); pc++;
+          final shift = pop();
+          final value = pop();
+          push(
+            shift >= BigInt.from(256) ? BigInt.zero : value << shift.toInt(),
+          );
+          pc++;
         case 0x1c: // SHR(shift, value)
-          final shift = pop(); final value = pop();
-          push(shift >= BigInt.from(256) ? BigInt.zero : value >> shift.toInt()); pc++;
+          final shift = pop();
+          final value = pop();
+          push(
+            shift >= BigInt.from(256) ? BigInt.zero : value >> shift.toInt(),
+          );
+          pc++;
         case 0x1d: // SAR(shift, value)
-          final shift = pop(); final value = _toSigned(pop());
+          final shift = pop();
+          final value = _toSigned(pop());
           if (shift >= BigInt.from(256)) {
             push(value < BigInt.zero ? _mask : BigInt.zero);
           } else {
             push(value >> shift.toInt());
           }
           pc++;
-        case 0x35: push(loadWord(calldataByte, pop().toInt())); pc++; // CALLDATALOAD
-        case 0x50: pop(); pc++; // POP
-        case 0x51: push(loadWord(memByte, pop().toInt())); pc++; // MLOAD
-        case 0x52: final off = pop(); final val = pop(); storeWord(off.toInt(), val); pc++; // MSTORE
-        case 0x33: push(caller); pc++; // CALLER
+        case 0x35:
+          push(loadWord(calldataByte, pop().toInt()));
+          pc++; // CALLDATALOAD
+        case 0x50:
+          pop();
+          pc++; // POP
+        case 0x51:
+          push(loadWord(memByte, pop().toInt()));
+          pc++; // MLOAD
+        case 0x52:
+          final off = pop();
+          final val = pop();
+          storeWord(off.toInt(), val);
+          pc++; // MSTORE
+        case 0x33:
+          push(caller);
+          pc++; // CALLER
         case 0x39: // CODECOPY(destOffset, offset, len)
-          final dest = pop().toInt(); final off = pop().toInt(); final len = pop().toInt();
+          final dest = pop().toInt();
+          final off = pop().toInt();
+          final len = pop().toInt();
           for (var i = 0; i < len; i++) {
             memory[dest + i] = (off + i) < code.length ? code[off + i] : 0;
           }
           pc++;
-        case 0x54: push(storage[pop()] ?? BigInt.zero); pc++; // SLOAD
-        case 0x55: final k = pop(); final v = pop(); storage[k] = v; pc++; // SSTORE
-        case 0xa0: case 0xa1: case 0xa2: case 0xa3: case 0xa4: // LOG0..LOG4
-          final off = pop().toInt(); final len = pop().toInt();
+        case 0x54:
+          push(storage[pop()] ?? BigInt.zero);
+          pc++; // SLOAD
+        case 0x55:
+          final k = pop();
+          final v = pop();
+          storage[k] = v;
+          pc++; // SSTORE
+        case 0xa0:
+        case 0xa1:
+        case 0xa2:
+        case 0xa3:
+        case 0xa4: // LOG0..LOG4
+          final off = pop().toInt();
+          final len = pop().toInt();
           final topics = [for (var i = 0; i < op - 0xa0; i++) pop()];
           final data = Uint8List(len);
           for (var i = 0; i < len; i++) data[i] = memByte(off + i);
-          logs.add((topics: topics, data: data)); pc++;
-        case 0x56: pc = _jump(pop()); // JUMP
+          logs.add((topics: topics, data: data));
+          pc++;
+        case 0x56:
+          pc = _jump(pop()); // JUMP
         case 0x57: // JUMPI
-          final dest = pop(); final cond = pop();
+          final dest = pop();
+          final cond = pop();
           pc = cond != BigInt.zero ? _jump(dest) : pc + 1;
-        case 0x5b: pc++; // JUMPDEST
-        case 0x5f: push(BigInt.zero); pc++; // PUSH0
+        case 0x5b:
+          pc++; // JUMPDEST
+        case 0x5f:
+          push(BigInt.zero);
+          pc++; // PUSH0
         case 0xf3: // RETURN
-          final off = pop().toInt(); final len = pop().toInt();
+          final off = pop().toInt();
+          final len = pop().toInt();
           final out = Uint8List(len);
           for (var i = 0; i < len; i++) out[i] = memByte(off + i);
           return out;
-        case 0xfd: return null; // REVERT
+        case 0xfd:
+          return null; // REVERT
         default:
           if (op >= 0x60 && op <= 0x7f) {
             final n = op - 0x5f; // PUSH1..PUSH32
@@ -178,7 +272,9 @@ class MiniEvm {
             stack[top - n] = tmp;
             pc++;
           } else {
-            throw StateError('Unsupported opcode 0x${op.toRadixString(16)} at $pc');
+            throw StateError(
+              'Unsupported opcode 0x${op.toRadixString(16)} at $pc',
+            );
           }
       }
     }
@@ -244,7 +340,9 @@ ContractOutput _contractOf(String source, String name) {
   final result = (CompilerStack()..addSource('$name.sol', source)).compile();
   final errors = result.diagnostics.where((d) => d.isError);
   if (errors.isNotEmpty) {
-    throw StateError('compile errors:\n${errors.map((d) => d.message).join('\n')}');
+    throw StateError(
+      'compile errors:\n${errors.map((d) => d.message).join('\n')}',
+    );
   }
   final c = result.contracts[name];
   if (c == null) throw StateError('contract "$name" not produced');
@@ -275,7 +373,9 @@ contract Adder {
   }
 }
 ''', 'Adder');
-      final out = MiniEvm(code).call(_calldata('getSum(uint256,uint256)', [2, 3]));
+      final out = MiniEvm(
+        code,
+      ).call(_calldata('getSum(uint256,uint256)', [2, 3]));
       expect(_asUint(out), BigInt.from(5));
     });
 
@@ -312,12 +412,18 @@ contract Loop {
   }
 }
 ''', 'Loop');
-      expect(_asUint(MiniEvm(code).call(_calldata('sumTo(uint256)', [5]))),
-          BigInt.from(10)); // 0+1+2+3+4
-      expect(_asUint(MiniEvm(code).call(_calldata('sumTo(uint256)', [1]))),
-          BigInt.zero);
-      expect(_asUint(MiniEvm(code).call(_calldata('sumTo(uint256)', [10]))),
-          BigInt.from(45));
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('sumTo(uint256)', [5]))),
+        BigInt.from(10),
+      ); // 0+1+2+3+4
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('sumTo(uint256)', [1]))),
+        BigInt.zero,
+      );
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('sumTo(uint256)', [10]))),
+        BigInt.from(45),
+      );
     });
 
     test('comparison operators', () {
@@ -329,11 +435,26 @@ contract Cmp {
 }
 ''', 'Cmp');
       final evm = MiniEvm(code);
-      expect(_asUint(evm.call(_calldata('ne(uint256,uint256)', [1, 2]))), BigInt.one);
-      expect(_asUint(evm.call(_calldata('ne(uint256,uint256)', [2, 2]))), BigInt.zero);
-      expect(_asUint(evm.call(_calldata('le(uint256,uint256)', [2, 3]))), BigInt.one);
-      expect(_asUint(evm.call(_calldata('le(uint256,uint256)', [3, 3]))), BigInt.one);
-      expect(_asUint(evm.call(_calldata('le(uint256,uint256)', [4, 3]))), BigInt.zero);
+      expect(
+        _asUint(evm.call(_calldata('ne(uint256,uint256)', [1, 2]))),
+        BigInt.one,
+      );
+      expect(
+        _asUint(evm.call(_calldata('ne(uint256,uint256)', [2, 2]))),
+        BigInt.zero,
+      );
+      expect(
+        _asUint(evm.call(_calldata('le(uint256,uint256)', [2, 3]))),
+        BigInt.one,
+      );
+      expect(
+        _asUint(evm.call(_calldata('le(uint256,uint256)', [3, 3]))),
+        BigInt.one,
+      );
+      expect(
+        _asUint(evm.call(_calldata('le(uint256,uint256)', [4, 3]))),
+        BigInt.zero,
+      );
     });
   });
 
@@ -353,35 +474,45 @@ contract Math {
     final maxU = (BigInt.one << 256) - BigInt.one;
 
     test('normal arithmetic still computes the right value', () {
-      expect(_asUint(MiniEvm(code).call(_calldata('add(uint256,uint256)', [40, 2]))),
-          BigInt.from(42));
-      expect(_asUint(MiniEvm(code).call(_calldata('mul(uint256,uint256)', [6, 7]))),
-          BigInt.from(42));
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('add(uint256,uint256)', [40, 2]))),
+        BigInt.from(42),
+      );
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('mul(uint256,uint256)', [6, 7]))),
+        BigInt.from(42),
+      );
     });
 
     test('addition overflow reverts (Panic)', () {
-      final out = MiniEvm(code)
-          .call(_calldataBig('add(uint256,uint256)', [maxU, BigInt.one]));
+      final out = MiniEvm(
+        code,
+      ).call(_calldataBig('add(uint256,uint256)', [maxU, BigInt.one]));
       expect(out, isNull, reason: 'MAX + 1 must revert');
     });
 
     test('subtraction underflow reverts (Panic)', () {
-      final out = MiniEvm(code)
-          .call(_calldata('sub(uint256,uint256)', [3, 5]));
+      final out = MiniEvm(code).call(_calldata('sub(uint256,uint256)', [3, 5]));
       expect(out, isNull, reason: '3 - 5 must revert on uint256');
     });
 
     test('multiplication overflow reverts (Panic)', () {
       final half = BigInt.one << 200;
-      final out = MiniEvm(code)
-          .call(_calldataBig('mul(uint256,uint256)', [half, half]));
+      final out = MiniEvm(
+        code,
+      ).call(_calldataBig('mul(uint256,uint256)', [half, half]));
       expect(out, isNull, reason: '2^200 * 2^200 must revert');
     });
 
     test('unchecked block wraps instead of reverting', () {
-      final out = MiniEvm(code)
-          .call(_calldataBig('addUnchecked(uint256,uint256)', [maxU, BigInt.one]));
-      expect(_asUint(out), BigInt.zero, reason: 'MAX + 1 wraps to 0 in unchecked');
+      final out = MiniEvm(
+        code,
+      ).call(_calldataBig('addUnchecked(uint256,uint256)', [maxU, BigInt.one]));
+      expect(
+        _asUint(out),
+        BigInt.zero,
+        reason: 'MAX + 1 wraps to 0 in unchecked',
+      );
     });
 
     test('narrow uint8 overflow reverts', () {
@@ -391,10 +522,15 @@ contract Narrow {
   function add8(uint8 a, uint8 b) public pure returns (uint8) { return a + b; }
 }
 ''', 'Narrow');
-      expect(_asUint(MiniEvm(c).call(_calldata('add8(uint8,uint8)', [200, 50]))),
-          BigInt.from(250));
-      expect(MiniEvm(c).call(_calldata('add8(uint8,uint8)', [200, 100])), isNull,
-          reason: '200 + 100 overflows uint8 (max 255)');
+      expect(
+        _asUint(MiniEvm(c).call(_calldata('add8(uint8,uint8)', [200, 50]))),
+        BigInt.from(250),
+      );
+      expect(
+        MiniEvm(c).call(_calldata('add8(uint8,uint8)', [200, 100])),
+        isNull,
+        reason: '200 + 100 overflows uint8 (max 255)',
+      );
     });
   });
 
@@ -409,26 +545,42 @@ contract Signed {
 ''', 'Signed');
 
     test('signed less-than uses SLT (negative < positive)', () {
-      expect(_asUint(MiniEvm(code).call(_calldata('lt(int256,int256)', [-1, 1]))),
-          BigInt.one, reason: '-1 < 1 is true with signed comparison');
-      expect(_asUint(MiniEvm(code).call(_calldata('lt(int256,int256)', [1, -1]))),
-          BigInt.zero);
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('lt(int256,int256)', [-1, 1]))),
+        BigInt.one,
+        reason: '-1 < 1 is true with signed comparison',
+      );
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('lt(int256,int256)', [1, -1]))),
+        BigInt.zero,
+      );
     });
 
     test('signed division uses SDIV (truncates toward zero)', () {
-      expect(_asInt(MiniEvm(code).call(_calldata('divide(int256,int256)', [-7, 2]))),
-          BigInt.from(-3), reason: '-7 / 2 == -3 (truncated)');
-      expect(_asInt(MiniEvm(code).call(_calldata('divide(int256,int256)', [7, -2]))),
-          BigInt.from(-3));
+      expect(
+        _asInt(MiniEvm(code).call(_calldata('divide(int256,int256)', [-7, 2]))),
+        BigInt.from(-3),
+        reason: '-7 / 2 == -3 (truncated)',
+      );
+      expect(
+        _asInt(MiniEvm(code).call(_calldata('divide(int256,int256)', [7, -2]))),
+        BigInt.from(-3),
+      );
     });
 
     test('signed subtraction yields negative results', () {
-      expect(_asInt(MiniEvm(code).call(_calldata('sub(int256,int256)', [3, 5]))),
-          BigInt.from(-2), reason: '3 - 5 == -2 for int256 (no revert)');
+      expect(
+        _asInt(MiniEvm(code).call(_calldata('sub(int256,int256)', [3, 5]))),
+        BigInt.from(-2),
+        reason: '3 - 5 == -2 for int256 (no revert)',
+      );
     });
 
     test('division by zero reverts (Panic 0x12)', () {
-      expect(MiniEvm(code).call(_calldata('divide(int256,int256)', [1, 0])), isNull);
+      expect(
+        MiniEvm(code).call(_calldata('divide(int256,int256)', [1, 0])),
+        isNull,
+      );
     });
   });
 
@@ -452,15 +604,22 @@ contract Guard {
 ''', 'Guard');
 
     test('require passes when condition holds', () {
-      expect(_asUint(MiniEvm(code).call(_calldata('mustBePositive(uint256)', [5]))),
-          BigInt.from(5));
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('mustBePositive(uint256)', [5]))),
+        BigInt.from(5),
+      );
     });
     test('require reverts when condition fails', () {
-      expect(MiniEvm(code).call(_calldata('mustBePositive(uint256)', [0])), isNull);
+      expect(
+        MiniEvm(code).call(_calldata('mustBePositive(uint256)', [0])),
+        isNull,
+      );
     });
     test('assert passes / fails correctly', () {
-      expect(_asUint(MiniEvm(code).call(_calldata('assertEven(uint256)', [4]))),
-          BigInt.from(4));
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('assertEven(uint256)', [4]))),
+        BigInt.from(4),
+      );
       expect(MiniEvm(code).call(_calldata('assertEven(uint256)', [3])), isNull);
     });
     test('revert(reason) always reverts', () {
@@ -491,22 +650,39 @@ contract Token {
 
     test('mint updates the caller\'s mapping entry', () {
       final evm = MiniEvm(code);
-      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.zero);
+      expect(
+        _asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))),
+        BigInt.zero,
+      );
       evm.call(_calldata('mint(uint256)', [100]));
       evm.call(_calldata('mint(uint256)', [50]));
-      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.from(150));
+      expect(
+        _asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))),
+        BigInt.from(150),
+      );
       // A different key is independent / still zero.
-      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xbb]))), BigInt.zero);
+      expect(
+        _asUint(evm.call(_calldata('balanceOf(address)', [0xbb]))),
+        BigInt.zero,
+      );
     });
 
     test('nested mapping slot is keccak-composed correctly', () {
       final evm = MiniEvm(code);
       evm.call(_calldata('approve(address,uint256)', [0xbb, 777]));
-      expect(_asUint(evm.call(_calldata('allowanceOf(address,address)', [0xaa, 0xbb]))),
-          BigInt.from(777));
+      expect(
+        _asUint(
+          evm.call(_calldata('allowanceOf(address,address)', [0xaa, 0xbb])),
+        ),
+        BigInt.from(777),
+      );
       // Swapped owner/spender must map to a different (empty) slot.
-      expect(_asUint(evm.call(_calldata('allowanceOf(address,address)', [0xbb, 0xaa]))),
-          BigInt.zero);
+      expect(
+        _asUint(
+          evm.call(_calldata('allowanceOf(address,address)', [0xbb, 0xaa])),
+        ),
+        BigInt.zero,
+      );
     });
   });
 
@@ -541,9 +717,15 @@ contract Mini {
 
     test('constructor initialises storage (read back through getters)', () {
       final evm = _deploy(erc20, 'Mini', deployer: BigInt.from(0xaa));
-      expect(_asUint(evm.call(_calldata('getSupply()', []))), BigInt.from(1000));
+      expect(
+        _asUint(evm.call(_calldata('getSupply()', []))),
+        BigInt.from(1000),
+      );
       expect(_asUint(evm.call(_calldata('getOwner()', []))), BigInt.from(0xaa));
-      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.from(1000));
+      expect(
+        _asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))),
+        BigInt.from(1000),
+      );
     });
 
     test('transfer moves balance and emits Transfer with correct topics', () {
@@ -552,14 +734,25 @@ contract Mini {
       evm.logs.clear();
       evm.call(_calldata('transfer(address,uint256)', [0xbb, 30]));
 
-      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.from(970));
-      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xbb]))), BigInt.from(30));
+      expect(
+        _asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))),
+        BigInt.from(970),
+      );
+      expect(
+        _asUint(evm.call(_calldata('balanceOf(address)', [0xbb]))),
+        BigInt.from(30),
+      );
 
       expect(evm.logs, hasLength(1));
       final log = evm.logs.single;
       // topic0 = keccak256("Transfer(address,address,uint256)")
-      expect(log.topics[0],
-          BigInt.parse('ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', radix: 16));
+      expect(
+        log.topics[0],
+        BigInt.parse(
+          'ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef',
+          radix: 16,
+        ),
+      );
       expect(log.topics[1], BigInt.from(0xaa)); // indexed from
       expect(log.topics[2], BigInt.from(0xbb)); // indexed to
       expect(_asUint(log.data), BigInt.from(30)); // non-indexed value
@@ -576,7 +769,10 @@ contract Mini {
     test('checked transfer underflow reverts (insufficient balance)', () {
       final evm = _deploy(erc20, 'Mini', deployer: BigInt.from(0xaa));
       evm.caller = BigInt.from(0xbb); // balance 0
-      expect(evm.call(_calldata('transfer(address,uint256)', [0xaa, 1])), isNull);
+      expect(
+        evm.call(_calldata('transfer(address,uint256)', [0xaa, 1])),
+        isNull,
+      );
     });
   });
 
@@ -592,8 +788,14 @@ contract Pub {
     test('auto-generated scalar and mapping getters return storage', () {
       final evm = _deploy(src, 'Pub', deployer: BigInt.from(0xaa));
       expect(_asUint(evm.call(_calldata('total()', []))), BigInt.from(42));
-      expect(_asUint(evm.call(_calldata('balances(address)', [0xaa]))), BigInt.from(7));
-      expect(_asUint(evm.call(_calldata('balances(address)', [0xbb]))), BigInt.zero);
+      expect(
+        _asUint(evm.call(_calldata('balances(address)', [0xaa]))),
+        BigInt.from(7),
+      );
+      expect(
+        _asUint(evm.call(_calldata('balances(address)', [0xbb]))),
+        BigInt.zero,
+      );
     });
   });
 
@@ -605,10 +807,15 @@ contract Cast {
   function toU8(uint256 x) public pure returns (uint8) { return uint8(x); }
 }
 ''', 'Cast');
-      expect(_asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x1ff]))),
-          BigInt.from(0xff), reason: '0x1ff truncated to uint8 == 0xff');
-      expect(_asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x42]))),
-          BigInt.from(0x42));
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x1ff]))),
+        BigInt.from(0xff),
+        reason: '0x1ff truncated to uint8 == 0xff',
+      );
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x42]))),
+        BigInt.from(0x42),
+      );
     });
   });
 }

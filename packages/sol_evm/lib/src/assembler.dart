@@ -58,15 +58,13 @@ class Assembler {
 
   void label(String name) => _instructions.add(LabelInstruction(name));
 
-  void jump(String target) =>
-      _instructions.add(JumpInstruction(target));
+  void jump(String target) => _instructions.add(JumpInstruction(target));
 
   void jumpi(String target) =>
       _instructions.add(JumpInstruction(target, conditional: true));
 
   /// Pushes the byte offset of [name] onto the stack (for use as a return address).
-  void pushLabel(String name) =>
-      _instructions.add(PushLabelInstruction(name));
+  void pushLabel(String name) => _instructions.add(PushLabelInstruction(name));
 
   /// Pushes the offset where the appended runtime code begins
   /// (= total creation-code length). Lowers Yul's `dataoffset(...)`.
@@ -129,7 +127,7 @@ class Assembler {
           out.addByte(Opcode.JUMPDEST.byte);
         case SimpleInstruction(:final opcode):
           out.addByte(opcode.byte);
-          // immediateBytes are emitted separately by PushInstruction
+        // immediateBytes are emitted separately by PushInstruction
         case PushInstruction(:final data):
           final pushOp = Opcode.pushForSize(data.length);
           out.addByte(pushOp.byte);

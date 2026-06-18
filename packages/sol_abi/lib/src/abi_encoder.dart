@@ -59,7 +59,8 @@ class AbiEncoder {
 
       case StringType():
         final bytes = Uint8List.fromList(
-            (value as String).codeUnits.map((c) => c & 0xFF).toList());
+          (value as String).codeUnits.map((c) => c & 0xFF).toList(),
+        );
         final builder = BytesBuilder();
         builder.add(_encodeUint(BigInt.from(bytes.length)));
         builder.add(bytes);
@@ -79,7 +80,9 @@ class AbiEncoder {
         return builder.toBytes();
 
       default:
-        throw UnsupportedError('ABI encoding not implemented for ${type.abiType}');
+        throw UnsupportedError(
+          'ABI encoding not implemented for ${type.abiType}',
+        );
     }
   }
 
@@ -102,7 +105,8 @@ class AbiEncoder {
     if (value is BigInt) return value;
     if (value is int) return BigInt.from(value);
     if (value is String) {
-      if (value.startsWith('0x')) return BigInt.parse(value.substring(2), radix: 16);
+      if (value.startsWith('0x'))
+        return BigInt.parse(value.substring(2), radix: 16);
       return BigInt.parse(value);
     }
     return BigInt.zero;

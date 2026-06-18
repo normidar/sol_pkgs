@@ -16,11 +16,13 @@ class Resolver extends AstVisitor {
   void resolve(SourceFile file) {
     // Hoist all top-level contract names so they can reference each other.
     for (final contract in file.declarations) {
-      _scope.declare(Symbol(
-        name: contract.name,
-        type: const ErrorType(),
-        kind: SymbolKind.contract,
-      ));
+      _scope.declare(
+        Symbol(
+          name: contract.name,
+          type: const ErrorType(),
+          kind: SymbolKind.contract,
+        ),
+      );
     }
     file.accept(this);
   }
@@ -34,53 +36,69 @@ class Resolver extends AstVisitor {
     for (final member in node.members) {
       switch (member) {
         case FunctionDefinition fn when fn.name != null:
-          _scope.declare(Symbol(
-            name: fn.name!,
-            type: const ErrorType(),
-            kind: SymbolKind.function,
-          ));
+          _scope.declare(
+            Symbol(
+              name: fn.name!,
+              type: const ErrorType(),
+              kind: SymbolKind.function,
+            ),
+          );
         case StateVariableDeclaration sv:
-          _scope.declare(Symbol(
-            name: sv.name,
-            type: solTypeFromTypeName(sv.typeName),
-            kind: SymbolKind.stateVariable,
-          ));
+          _scope.declare(
+            Symbol(
+              name: sv.name,
+              type: solTypeFromTypeName(sv.typeName),
+              kind: SymbolKind.stateVariable,
+            ),
+          );
         case EventDefinition ev:
-          _scope.declare(Symbol(
-            name: ev.name,
-            type: const ErrorType(),
-            kind: SymbolKind.event,
-          ));
+          _scope.declare(
+            Symbol(
+              name: ev.name,
+              type: const ErrorType(),
+              kind: SymbolKind.event,
+            ),
+          );
         case CustomErrorDefinition err:
-          _scope.declare(Symbol(
-            name: err.name,
-            type: const ErrorType(),
-            kind: SymbolKind.error,
-          ));
+          _scope.declare(
+            Symbol(
+              name: err.name,
+              type: const ErrorType(),
+              kind: SymbolKind.error,
+            ),
+          );
         case StructDefinition s:
-          _scope.declare(Symbol(
-            name: s.name,
-            type: const ErrorType(),
-            kind: SymbolKind.struct,
-          ));
+          _scope.declare(
+            Symbol(
+              name: s.name,
+              type: const ErrorType(),
+              kind: SymbolKind.struct,
+            ),
+          );
         case EnumDefinition e:
-          _scope.declare(Symbol(
-            name: e.name,
-            type: const ErrorType(),
-            kind: SymbolKind.enum$,
-          ));
+          _scope.declare(
+            Symbol(
+              name: e.name,
+              type: const ErrorType(),
+              kind: SymbolKind.enum$,
+            ),
+          );
         case ModifierDefinition m:
-          _scope.declare(Symbol(
-            name: m.name,
-            type: const ErrorType(),
-            kind: SymbolKind.modifier,
-          ));
+          _scope.declare(
+            Symbol(
+              name: m.name,
+              type: const ErrorType(),
+              kind: SymbolKind.modifier,
+            ),
+          );
         case UserDefinedValueTypeDefinition uvt:
-          _scope.declare(Symbol(
-            name: uvt.name,
-            type: const ErrorType(),
-            kind: SymbolKind.contract, // treated as a type alias
-          ));
+          _scope.declare(
+            Symbol(
+              name: uvt.name,
+              type: const ErrorType(),
+              kind: SymbolKind.contract, // treated as a type alias
+            ),
+          );
         default:
           break;
       }
@@ -100,20 +118,24 @@ class Resolver extends AstVisitor {
 
     for (final p in node.parameters) {
       if (p.name != null && p.name!.isNotEmpty) {
-        _scope.declare(Symbol(
-          name: p.name!,
-          type: solTypeFromTypeName(p.typeName),
-          kind: SymbolKind.parameter,
-        ));
+        _scope.declare(
+          Symbol(
+            name: p.name!,
+            type: solTypeFromTypeName(p.typeName),
+            kind: SymbolKind.parameter,
+          ),
+        );
       }
     }
     for (final p in node.returnParameters) {
       if (p.name != null && p.name!.isNotEmpty) {
-        _scope.declare(Symbol(
-          name: p.name!,
-          type: solTypeFromTypeName(p.typeName),
-          kind: SymbolKind.localVariable,
-        ));
+        _scope.declare(
+          Symbol(
+            name: p.name!,
+            type: solTypeFromTypeName(p.typeName),
+            kind: SymbolKind.localVariable,
+          ),
+        );
       }
     }
 
@@ -128,11 +150,13 @@ class Resolver extends AstVisitor {
 
     for (final p in node.parameters) {
       if (p.name != null && p.name!.isNotEmpty) {
-        _scope.declare(Symbol(
-          name: p.name!,
-          type: solTypeFromTypeName(p.typeName),
-          kind: SymbolKind.parameter,
-        ));
+        _scope.declare(
+          Symbol(
+            name: p.name!,
+            type: solTypeFromTypeName(p.typeName),
+            kind: SymbolKind.parameter,
+          ),
+        );
       }
     }
 
@@ -210,11 +234,13 @@ class Resolver extends AstVisitor {
     _scope = Scope(parent: _scope);
     for (final p in node.parameters) {
       if (p.name != null && p.name!.isNotEmpty) {
-        _scope.declare(Symbol(
-          name: p.name!,
-          type: solTypeFromTypeName(p.typeName),
-          kind: SymbolKind.parameter,
-        ));
+        _scope.declare(
+          Symbol(
+            name: p.name!,
+            type: solTypeFromTypeName(p.typeName),
+            kind: SymbolKind.parameter,
+          ),
+        );
       }
     }
     node.body.accept(this);
@@ -231,11 +257,13 @@ class Resolver extends AstVisitor {
     node.initialValue?.accept(this);
     for (final decl in node.declarations) {
       if (decl == null) continue;
-      _scope.declare(Symbol(
-        name: decl.name,
-        type: solTypeFromTypeName(decl.typeName),
-        kind: SymbolKind.localVariable,
-      ));
+      _scope.declare(
+        Symbol(
+          name: decl.name,
+          type: solTypeFromTypeName(decl.typeName),
+          kind: SymbolKind.localVariable,
+        ),
+      );
     }
   }
 

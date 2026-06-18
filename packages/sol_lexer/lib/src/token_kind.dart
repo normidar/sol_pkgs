@@ -42,8 +42,7 @@ enum TokenKind {
   kStruct,
   kEnum,
   kMapping,
-  kReturns,   // ← was missing
-
+  kReturns, // ← was missing
   // ── Elementary types ───────────────────────────────────────────────────────
   kAddress,
   kBool,
@@ -51,10 +50,13 @@ enum TokenKind {
   kBytes,
   kInt,
   kUint,
+
   /// `intN`  — [Token.intWidth] carries the bit width (8..256).
   IntN,
+
   /// `uintN` — [Token.intWidth] carries the bit width (8..256).
   UintN,
+
   /// `bytesN` — [Token.intWidth] carries the byte count (1..32).
   BytesN,
 
@@ -119,70 +121,68 @@ enum TokenKind {
   kAnonymous,
 
   // ── Operators ─────────────────────────────────────────────────────────────
-  Plus,         // +
-  Minus,        // -
-  Star,         // *
-  Slash,        // /
-  Percent,      // %
-  StarStar,     // **
+  Plus, // +
+  Minus, // -
+  Star, // *
+  Slash, // /
+  Percent, // %
+  StarStar, // **
 
-  Ampersand,    // &
-  Pipe,         // |
-  Caret,        // ^
-  Tilde,        // ~
-  LtLt,         // <<
-  GtGt,         // >>
-  GtGtGt,       // >>>
+  Ampersand, // &
+  Pipe, // |
+  Caret, // ^
+  Tilde, // ~
+  LtLt, // <<
+  GtGt, // >>
+  GtGtGt, // >>>
 
-  AmpAmp,       // &&
-  PipePipe,     // ||
-  Bang,         // !
+  AmpAmp, // &&
+  PipePipe, // ||
+  Bang, // !
 
-  EqEq,         // ==
-  BangEq,       // !=
-  Lt,           // <
-  LtEq,         // <=
-  Gt,           // >
-  GtEq,         // >=
+  EqEq, // ==
+  BangEq, // !=
+  Lt, // <
+  LtEq, // <=
+  Gt, // >
+  GtEq, // >=
 
-  Eq,           // =
-  PlusEq,       // +=
-  MinusEq,      // -=
-  StarEq,       // *=
-  SlashEq,      // /=
-  PercentEq,    // %=
-  AmpEq,        // &=
-  PipeEq,       // |=
-  CaretEq,      // ^=
-  LtLtEq,       // <<=
-  GtGtEq,       // >>=
-  GtGtGtEq,     // >>>=
+  Eq, // =
+  PlusEq, // +=
+  MinusEq, // -=
+  StarEq, // *=
+  SlashEq, // /=
+  PercentEq, // %=
+  AmpEq, // &=
+  PipeEq, // |=
+  CaretEq, // ^=
+  LtLtEq, // <<=
+  GtGtEq, // >>=
+  GtGtGtEq, // >>>=
 
-  PlusPlus,     // ++
-  MinusMinus,   // --
+  PlusPlus, // ++
+  MinusMinus, // --
 
-  Arrow,        // =>
-  RightArrow,   // ->
-  Question,     // ?
-  Colon,        // :
-  ColonColon,   // ::
-  Dot,          // .
-  DotDotDot,    // ...
-
+  Arrow, // =>
+  RightArrow, // ->
+  Question, // ?
+  Colon, // :
+  ColonColon, // ::
+  Dot, // .
+  DotDotDot, // ...
   // ── Delimiters ─────────────────────────────────────────────────────────────
-  LParen,       // (
-  RParen,       // )
-  LBracket,     // [
-  RBracket,     // ]
-  LBrace,       // {
-  RBrace,       // }
-  Semicolon,    // ;
-  Comma,        // ,
-
+  LParen, // (
+  RParen, // )
+  LBracket, // [
+  RBracket, // ]
+  LBrace, // {
+  RBrace, // }
+  Semicolon, // ;
+  Comma, // ,
   // ── Trivia & special ───────────────────────────────────────────────────────
-  NatSpecLine,   // /// …
-  NatSpecBlock,  // /** … */
-  Comment,       // // … or /* … */
+  NatSpecLine, // /// …
+  NatSpecBlock, // /** … */
+  Comment, // // … or /* … */
   Whitespace,
   Eof,
   Error,

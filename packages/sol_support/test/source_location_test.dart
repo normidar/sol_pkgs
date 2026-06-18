@@ -42,8 +42,10 @@ void main() {
 
     test('fatalError throws FatalErrorException', () {
       final col = DiagnosticCollector();
-      expect(() => col.fatalError('file not found'),
-          throwsA(isA<FatalErrorException>()));
+      expect(
+        () => col.fatalError('file not found'),
+        throwsA(isA<FatalErrorException>()),
+      );
     });
   });
 

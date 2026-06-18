@@ -33,34 +33,34 @@ class AbiGenerator {
       const JsonEncoder.withIndent('  ').convert(generate(contract));
 
   Map<String, dynamic> _functionEntry(FunctionDefinition fn) => {
-        'type': 'function',
-        'name': fn.name,
-        'inputs': fn.parameters.map(_paramEntry).toList(),
-        'outputs': fn.returnParameters.map(_paramEntry).toList(),
-        'stateMutability': fn.stateMutability.name,
-      };
+    'type': 'function',
+    'name': fn.name,
+    'inputs': fn.parameters.map(_paramEntry).toList(),
+    'outputs': fn.returnParameters.map(_paramEntry).toList(),
+    'stateMutability': fn.stateMutability.name,
+  };
 
   Map<String, dynamic> _eventEntry(EventDefinition ev) => {
-        'type': 'event',
-        'name': ev.name,
-        'inputs': ev.parameters.map((p) {
-          final entry = _paramEntry(p);
-          entry['indexed'] = p.indexed;
-          return entry;
-        }).toList(),
-        'anonymous': ev.anonymous,
-      };
+    'type': 'event',
+    'name': ev.name,
+    'inputs': ev.parameters.map((p) {
+      final entry = _paramEntry(p);
+      entry['indexed'] = p.indexed;
+      return entry;
+    }).toList(),
+    'anonymous': ev.anonymous,
+  };
 
   Map<String, dynamic> _errorEntry(CustomErrorDefinition err) => {
-        'type': 'error',
-        'name': err.name,
-        'inputs': err.parameters.map(_paramEntry).toList(),
-      };
+    'type': 'error',
+    'name': err.name,
+    'inputs': err.parameters.map(_paramEntry).toList(),
+  };
 
   Map<String, dynamic> _paramEntry(Parameter p) => {
-        'name': p.name ?? '',
-        'type': _typeString(p.typeName),
-      };
+    'name': p.name ?? '',
+    'type': _typeString(p.typeName),
+  };
 
   String _typeString(TypeName typeName) {
     // Mappings never appear in an ABI; everything else uses the canonical form.

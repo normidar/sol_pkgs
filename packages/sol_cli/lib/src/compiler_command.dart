@@ -11,8 +11,10 @@ int runCompiler(List<String> args) {
     ..addFlag('bin', help: 'Output EVM bytecode (hex).')
     ..addFlag('abi', help: 'Output ABI JSON.')
     ..addFlag('ir', abbr: 'y', help: 'Output Yul IR.')
-    ..addFlag('standard-json',
-        help: 'Read standard-JSON from stdin, write to stdout.')
+    ..addFlag(
+      'standard-json',
+      help: 'Read standard-JSON from stdin, write to stdout.',
+    )
     ..addFlag('version', negatable: false, help: 'Print version and exit.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.');
 

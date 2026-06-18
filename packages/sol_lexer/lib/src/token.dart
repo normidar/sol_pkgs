@@ -21,5 +21,6 @@ class Token {
   bool get isEof => kind == TokenKind.Eof;
 
   @override
-  String toString() => 'Token(${kind.name}, ${lexeme.isEmpty ? "" : '"$lexeme"'}, $location)';
+  String toString() =>
+      'Token(${kind.name}, ${lexeme.isEmpty ? "" : '"$lexeme"'}, $location)';
 }

@@ -197,7 +197,6 @@ enum Opcode {
   /// Returns the appropriate PUSHn opcode for [byteCount] immediate bytes.
   static Opcode pushForSize(int byteCount) {
     assert(byteCount >= 1 && byteCount <= 32);
-    return Opcode.values
-        .firstWhere((op) => op.name == 'PUSH$byteCount');
+    return Opcode.values.firstWhere((op) => op.name == 'PUSH$byteCount');
   }
 }

@@ -20,11 +20,26 @@ void main() {
             kind: FunctionKind.function,
             name: 'getSum',
             parameters: [
-              Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), 'a', null),
-              Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), 'b', null),
+              Parameter(
+                loc,
+                ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                'a',
+                null,
+              ),
+              Parameter(
+                loc,
+                ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                'b',
+                null,
+              ),
             ],
             returnParameters: [
-              Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), null, null),
+              Parameter(
+                loc,
+                ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                null,
+                null,
+              ),
             ],
             visibility: Visibility.public,
             stateMutability: StateMutability.pure,
@@ -50,22 +65,28 @@ void main() {
         'Token',
         [],
         [
-          EventDefinition(
-            loc,
-            'Transfer',
-            [
-              Parameter(loc, ElementaryTypeName(loc, 'address'), 'from', null,
-                  indexed: true),
-              Parameter(loc, ElementaryTypeName(loc, 'address'), 'to', null,
-                  indexed: true),
-              Parameter(
-                  loc,
-                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
-                  'value',
-                  null),
-            ],
-            false,
-          ),
+          EventDefinition(loc, 'Transfer', [
+            Parameter(
+              loc,
+              ElementaryTypeName(loc, 'address'),
+              'from',
+              null,
+              indexed: true,
+            ),
+            Parameter(
+              loc,
+              ElementaryTypeName(loc, 'address'),
+              'to',
+              null,
+              indexed: true,
+            ),
+            Parameter(
+              loc,
+              ElementaryTypeName(loc, 'uint256', intWidth: 256),
+              'value',
+              null,
+            ),
+          ], false),
         ],
       );
 
@@ -77,38 +98,32 @@ void main() {
     });
 
     test('renders fixed-length array types', () {
-      final contract = ContractDefinition(
-        loc,
-        ContractKind.contract,
-        'C',
-        [],
-        [
-          FunctionDefinition(
-            location: loc,
-            kind: FunctionKind.function,
-            name: 'f',
-            parameters: [
-              Parameter(
+      final contract = ContractDefinition(loc, ContractKind.contract, 'C', [], [
+        FunctionDefinition(
+          location: loc,
+          kind: FunctionKind.function,
+          name: 'f',
+          parameters: [
+            Parameter(
+              loc,
+              ArrayTypeName(
                 loc,
-                ArrayTypeName(
-                  loc,
-                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
-                  Literal(loc, LiteralKind.number, '3', null),
-                ),
-                'xs',
-                DataLocation.memory,
+                ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                Literal(loc, LiteralKind.number, '3', null),
               ),
-            ],
-            returnParameters: [],
-            visibility: Visibility.public,
-            stateMutability: StateMutability.pure,
-            isVirtual: false,
-            overrideSpecifier: [],
-            modifiers: [],
-            body: null,
-          ),
-        ],
-      );
+              'xs',
+              DataLocation.memory,
+            ),
+          ],
+          returnParameters: [],
+          visibility: Visibility.public,
+          stateMutability: StateMutability.pure,
+          isVirtual: false,
+          overrideSpecifier: [],
+          modifiers: [],
+          body: null,
+        ),
+      ]);
 
       final abi = AbiGenerator().generate(contract);
       expect((abi.first['inputs'] as List).first['type'], 'uint256[3]');
@@ -123,8 +138,12 @@ void main() {
         name: 'transfer',
         parameters: [
           Parameter(loc, ElementaryTypeName(loc, 'address'), 'to', null),
-          Parameter(loc, ElementaryTypeName(loc, 'uint', intWidth: 0), 'amount',
-              null),
+          Parameter(
+            loc,
+            ElementaryTypeName(loc, 'uint', intWidth: 0),
+            'amount',
+            null,
+          ),
         ],
         returnParameters: [],
         visibility: Visibility.external,
@@ -156,10 +175,7 @@ void main() {
 
     test('encodes two uint256 arguments', () {
       final enc = AbiEncoder();
-      final bytes = enc.encode([
-        (uint256Type, 1),
-        (uint256Type, 2),
-      ]);
+      final bytes = enc.encode([(uint256Type, 1), (uint256Type, 2)]);
       expect(bytes.length, 64);
       expect(bytes[31], 1);
       expect(bytes[63], 2);

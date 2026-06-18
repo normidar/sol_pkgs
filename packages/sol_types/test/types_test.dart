@@ -39,7 +39,10 @@ void main() {
 
   group('isExplicitlyConvertible', () {
     test('uint256 → address (160-bit only)', () {
-      expect(isExplicitlyConvertible(const IntType(160, signed: false), addressType), isTrue);
+      expect(
+        isExplicitlyConvertible(const IntType(160, signed: false), addressType),
+        isTrue,
+      );
       expect(isExplicitlyConvertible(uint256Type, addressType), isFalse);
     });
   });

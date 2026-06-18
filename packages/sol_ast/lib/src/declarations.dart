@@ -31,12 +31,7 @@ class PragmaDirective extends AstNode {
 }
 
 class ImportDirective extends AstNode {
-  ImportDirective(
-    super.location,
-    this.path,
-    this.alias,
-    this.symbolAliases,
-  );
+  ImportDirective(super.location, this.path, this.alias, this.symbolAliases);
 
   final String path;
   final String? alias;
@@ -235,7 +230,11 @@ class UsingDirective extends AstNode {
 // ── Type definition (user-defined value type) ─────────────────────────────────
 
 class UserDefinedValueTypeDefinition extends AstNode {
-  UserDefinedValueTypeDefinition(super.location, this.name, this.underlyingType);
+  UserDefinedValueTypeDefinition(
+    super.location,
+    this.name,
+    this.underlyingType,
+  );
 
   final String name;
   final TypeName underlyingType;

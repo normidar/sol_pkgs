@@ -7,8 +7,11 @@ import 'package:test/test.dart';
 SourceFile parse(String src) {
   final diagnostics = DiagnosticCollector();
   final tokens = Lexer(source: src, sourceIndex: 0).tokenize();
-  return Parser(tokens: tokens, sourceIndex: 0, diagnostics: diagnostics)
-      .parse();
+  return Parser(
+    tokens: tokens,
+    sourceIndex: 0,
+    diagnostics: diagnostics,
+  ).parse();
 }
 
 void main() {
@@ -65,7 +68,8 @@ contract Adder {
   group('Parser – state variable', () {
     test('parses uint256 public constant', () {
       final ast = parse('contract C { uint256 public constant MAX = 100; }');
-      final sv = ast.declarations.first.members.first as StateVariableDeclaration;
+      final sv =
+          ast.declarations.first.members.first as StateVariableDeclaration;
       expect(sv.name, 'MAX');
       expect(sv.mutability, VariableMutability.constant);
     });

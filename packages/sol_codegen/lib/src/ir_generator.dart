@@ -43,14 +43,18 @@ class IRGenerator {
   YulObject generateContract(ContractDefinition contract) {
     _events
       ..clear()
-      ..addEntries(contract.members
-          .whereType<EventDefinition>()
-          .map((e) => MapEntry(e.name, e)));
+      ..addEntries(
+        contract.members.whereType<EventDefinition>().map(
+          (e) => MapEntry(e.name, e),
+        ),
+      );
     _errors
       ..clear()
-      ..addEntries(contract.members
-          .whereType<CustomErrorDefinition>()
-          .map((e) => MapEntry(e.name, e)));
+      ..addEntries(
+        contract.members.whereType<CustomErrorDefinition>().map(
+          (e) => MapEntry(e.name, e),
+        ),
+      );
     _allocateStateVariables(contract);
 
     final runtimeBlock = _generateRuntimeCode(contract);
@@ -63,12 +67,7 @@ class IRGenerator {
       {},
     );
 
-    return YulObject(
-      contract.name,
-      deployBlock,
-      [runtimeObj],
-      {},
-    );
+    return YulObject(contract.name, deployBlock, [runtimeObj], {});
   }
 
   /// Assigns sequential storage slots to mutable state variables.
@@ -176,12 +175,14 @@ class IRGenerator {
     stmts.addAll(functions);
 
     // Revert if no selector matched.
-    stmts.add(YulExpressionStatement(
-      YulFunctionCall('revert', [
-        YulLiteral('0', YulLiteralKind.number),
-        YulLiteral('0', YulLiteralKind.number),
-      ]),
-    ));
+    stmts.add(
+      YulExpressionStatement(
+        YulFunctionCall('revert', [
+          YulLiteral('0', YulLiteralKind.number),
+          YulLiteral('0', YulLiteralKind.number),
+        ]),
+      ),
+    );
 
     // Emit discovered helper functions (hoisted alongside the others).
     stmts.addAll(_helpers.values);
@@ -192,9 +193,11 @@ class IRGenerator {
   YulStatement _generateDispatcher(ContractDefinition contract) {
     final publicFns = contract.members
         .whereType<FunctionDefinition>()
-        .where((fn) =>
-            fn.visibility == Visibility.public ||
-            fn.visibility == Visibility.external)
+        .where(
+          (fn) =>
+              fn.visibility == Visibility.public ||
+              fn.visibility == Visibility.external,
+        )
         .where((fn) => fn.name != null)
         .toList();
 
@@ -220,12 +223,14 @@ class IRGenerator {
         ];
         body.add(YulVariableDeclaration(captures, call));
         for (var i = 0; i < returnCount; i++) {
-          body.add(YulExpressionStatement(
-            YulFunctionCall('mstore', [
-              YulLiteral('${i * 32}', YulLiteralKind.number),
-              YulIdentifier(captures[i]),
-            ]),
-          ));
+          body.add(
+            YulExpressionStatement(
+              YulFunctionCall('mstore', [
+                YulLiteral('${i * 32}', YulLiteralKind.number),
+                YulIdentifier(captures[i]),
+              ]),
+            ),
+          );
         }
         body.add(_abiReturn(returnCount * 32));
       }
@@ -273,13 +278,18 @@ class IRGenerator {
     while (true) {
       if (typeName is MappingTypeName) {
         keyTypes.add(abiCanonicalType(typeName.keyType));
-        slotExpr = YulFunctionCall(
-            _mappingSlotHelper(), [_calldataArg(argIndex++), slotExpr]);
+        slotExpr = YulFunctionCall(_mappingSlotHelper(), [
+          _calldataArg(argIndex++),
+          slotExpr,
+        ]);
         typeName = typeName.valueType;
       } else if (typeName is ArrayTypeName) {
         keyTypes.add('uint256');
         slotExpr = typeName.length == null
-            ? YulFunctionCall(_dynArraySlotHelper(), [slotExpr, _calldataArg(argIndex++)])
+            ? YulFunctionCall(_dynArraySlotHelper(), [
+                slotExpr,
+                _calldataArg(argIndex++),
+              ])
             : YulFunctionCall('add', [slotExpr, _calldataArg(argIndex++)]);
         typeName = typeName.baseType;
       } else {
@@ -293,14 +303,18 @@ class IRGenerator {
     return YulCase(
       YulLiteral(selectorHex(signature), YulLiteralKind.number),
       YulBlock([
-        _callStmt('mstore', [_n('0'), YulFunctionCall('sload', [slotExpr])]),
+        _callStmt('mstore', [
+          _n('0'),
+          YulFunctionCall('sload', [slotExpr]),
+        ]),
         _abiReturn(32),
       ]),
     );
   }
 
-  YulExpression _calldataArg(int index) => YulFunctionCall(
-      'calldataload', [YulLiteral('${4 + index * 32}', YulLiteralKind.number)]);
+  YulExpression _calldataArg(int index) => YulFunctionCall('calldataload', [
+    YulLiteral('${4 + index * 32}', YulLiteralKind.number),
+  ]);
 
   YulFunctionDefinition _generateFunction(FunctionDefinition fn) {
     // Parameters are referenced from the body as plain identifiers, so their
@@ -358,20 +372,18 @@ class IRGenerator {
           for (var i = 0; i < n; i++) {
             final component = expression.components[i];
             if (component != null) {
-              stmts.add(YulAssignment(
-                [_returnSlots[i]],
-                _generateExpression(component),
-              ));
+              stmts.add(
+                YulAssignment([
+                  _returnSlots[i],
+                ], _generateExpression(component)),
+              );
             }
           }
           stmts.add(YulLeave());
           return YulBlock(stmts);
         }
         return YulBlock([
-          YulAssignment(
-            [_returnSlots.first],
-            _generateExpression(expression),
-          ),
+          YulAssignment([_returnSlots.first], _generateExpression(expression)),
           YulLeave(),
         ]);
 
@@ -382,11 +394,11 @@ class IRGenerator {
         return _generateBlock(stmt);
 
       case ForStatement(
-          :final initStatement,
-          :final condition,
-          :final loopExpression,
-          :final body
-        ):
+        :final initStatement,
+        :final condition,
+        :final loopExpression,
+        :final body,
+      ):
         return YulForLoop(
           initStatement != null
               ? YulBlock([_generateStatement(initStatement)])
@@ -433,7 +445,10 @@ class IRGenerator {
 
       case IfStatement(:final condition, :final trueBody, :final falseBody):
         if (falseBody == null) {
-          return YulIf(_generateExpression(condition), _generateBlock2(trueBody));
+          return YulIf(
+            _generateExpression(condition),
+            _generateBlock2(trueBody),
+          );
         }
         final tmp = _tmp();
         return YulBlock([
@@ -445,7 +460,10 @@ class IRGenerator {
           ),
         ]);
 
-      case VariableDeclarationStatement(:final declarations, :final initialValue):
+      case VariableDeclarationStatement(
+        :final declarations,
+        :final initialValue,
+      ):
         for (final d in declarations) {
           if (d != null) _localNames.add(d.name);
         }
@@ -490,7 +508,11 @@ class IRGenerator {
   /// [_generateExpression] cannot express).
   YulStatement _generateExpressionStatement(Expression expr) {
     switch (expr) {
-      case Assignment(:final operator$, :final leftHandSide, :final rightHandSide):
+      case Assignment(
+        :final operator$,
+        :final leftHandSide,
+        :final rightHandSide,
+      ):
         var value = _generateExpression(rightHandSide);
         if (operator$ != '=') {
           // Compound assignment: x op= y  ⇒  x = x op y.
@@ -552,7 +574,14 @@ class IRGenerator {
         );
       case 'revert':
         return _generateRevert(
-          args.isEmpty ? null : FunctionCall(location, Identifier(location, 'revert'), args, const []),
+          args.isEmpty
+              ? null
+              : FunctionCall(
+                  location,
+                  Identifier(location, 'revert'),
+                  args,
+                  const [],
+                ),
         );
     }
     return YulBlock([]);
@@ -567,13 +596,15 @@ class IRGenerator {
         if (expression.arguments.length == 1 &&
             expression.arguments.first is Literal) {
           return YulBlock(
-              _revertWithReason((expression.arguments.first as Literal).value));
+            _revertWithReason((expression.arguments.first as Literal).value),
+          );
         }
         return YulBlock([_revertCall(0, 0)]);
       }
       if (callee is Identifier && _errors.containsKey(callee.name)) {
-        return YulBlock(_revertWithError(
-            _errors[callee.name]!, expression.arguments));
+        return YulBlock(
+          _revertWithError(_errors[callee.name]!, expression.arguments),
+        );
       }
     }
     return YulBlock([_revertCall(0, 0)]);
@@ -582,12 +613,20 @@ class IRGenerator {
   /// `revert CustomError(args)` → store the 4-byte selector + ABI-encoded
   /// (static value-type) args in memory and revert with them.
   List<YulStatement> _revertWithError(
-      CustomErrorDefinition error, List<Expression> args) {
-    final selector = int.parse(selectorHex(errorSignature(error)).substring(2), radix: 16);
+    CustomErrorDefinition error,
+    List<Expression> args,
+  ) {
+    final selector = int.parse(
+      selectorHex(errorSignature(error)).substring(2),
+      radix: 16,
+    );
     final stmts = <YulStatement>[
       _callStmt('mstore', [_n('0'), _n(_selectorWord(selector))]),
       for (var i = 0; i < args.length; i++)
-        _callStmt('mstore', [_n('${4 + i * 32}'), _generateExpression(args[i])]),
+        _callStmt('mstore', [
+          _n('${4 + i * 32}'),
+          _generateExpression(args[i]),
+        ]),
     ];
     stmts.add(_revertCall(0, 4 + args.length * 32));
     return stmts;
@@ -612,7 +651,11 @@ class IRGenerator {
       topics.add(_n(eventTopicHex(event)));
     }
     final dataArgs = <YulExpression>[];
-    for (var i = 0; i < call.arguments.length && i < event.parameters.length; i++) {
+    for (
+      var i = 0;
+      i < call.arguments.length && i < event.parameters.length;
+      i++
+    ) {
       final value = _generateExpression(call.arguments[i]);
       if (event.parameters[i].indexed) {
         topics.add(value);
@@ -625,11 +668,13 @@ class IRGenerator {
       for (var i = 0; i < dataArgs.length; i++)
         _callStmt('mstore', [_n('${i * 32}'), dataArgs[i]]),
     ];
-    stmts.add(_callStmt('log${topics.length}', [
-      _n('0'),
-      _n('${dataArgs.length * 32}'),
-      ...topics,
-    ]));
+    stmts.add(
+      _callStmt('log${topics.length}', [
+        _n('0'),
+        _n('${dataArgs.length * 32}'),
+        ...topics,
+      ]),
+    );
     return YulBlock(stmts);
   }
 
@@ -683,8 +728,8 @@ class IRGenerator {
           kind == LiteralKind.bool$
               ? YulLiteralKind.bool$
               : kind == LiteralKind.string || kind == LiteralKind.unicodeString
-                  ? YulLiteralKind.string
-                  : YulLiteralKind.number,
+              ? YulLiteralKind.string
+              : YulLiteralKind.number,
         );
 
       case Identifier(:final name):
@@ -732,7 +777,9 @@ class IRGenerator {
           final builtin = _valueBuiltin(expression.name, arguments.length);
           if (builtin != null) {
             return YulFunctionCall(
-                builtin, arguments.map(_generateExpression).toList());
+              builtin,
+              arguments.map(_generateExpression).toList(),
+            );
           }
           return YulFunctionCall(
             'fun_${expression.name}',
@@ -785,10 +832,12 @@ class IRGenerator {
         }
         return YulFunctionCall(_rawArith(op), [l, r]);
       case '/':
-        if (type != null) return YulFunctionCall(_checkedDivMod('/', type), [l, r]);
+        if (type != null)
+          return YulFunctionCall(_checkedDivMod('/', type), [l, r]);
         return YulFunctionCall('div', [l, r]);
       case '%':
-        if (type != null) return YulFunctionCall(_checkedDivMod('%', type), [l, r]);
+        if (type != null)
+          return YulFunctionCall(_checkedDivMod('%', type), [l, r]);
         return YulFunctionCall('mod', [l, r]);
       case '**':
         // Exponentiation overflow checking is not yet modelled.
@@ -798,17 +847,21 @@ class IRGenerator {
       case '==':
         return YulFunctionCall('eq', [l, r]);
       case '!=':
-        return YulFunctionCall('iszero', [YulFunctionCall('eq', [l, r])]);
+        return YulFunctionCall('iszero', [
+          YulFunctionCall('eq', [l, r]),
+        ]);
       case '<':
         return YulFunctionCall(signed ? 'slt' : 'lt', [l, r]);
       case '>':
         return YulFunctionCall(signed ? 'sgt' : 'gt', [l, r]);
       case '<=':
-        return YulFunctionCall(
-            'iszero', [YulFunctionCall(signed ? 'sgt' : 'gt', [l, r])]);
+        return YulFunctionCall('iszero', [
+          YulFunctionCall(signed ? 'sgt' : 'gt', [l, r]),
+        ]);
       case '>=':
-        return YulFunctionCall(
-            'iszero', [YulFunctionCall(signed ? 'slt' : 'lt', [l, r])]);
+        return YulFunctionCall('iszero', [
+          YulFunctionCall(signed ? 'slt' : 'lt', [l, r]),
+        ]);
 
       // ── Bitwise & logical ──
       case '&':
@@ -837,11 +890,11 @@ class IRGenerator {
   }
 
   static String _rawArith(String op) => switch (op) {
-        '+' => 'add',
-        '-' => 'sub',
-        '*' => 'mul',
-        _ => 'add',
-      };
+    '+' => 'add',
+    '-' => 'sub',
+    '*' => 'mul',
+    _ => 'add',
+  };
 
   /// Lowers a unary operator to a Yul expression.
   ///
@@ -878,11 +931,11 @@ class IRGenerator {
 
   /// `return(0, size)` — hands back the ABI-encoded head region.
   YulStatement _abiReturn(int size) => YulExpressionStatement(
-        YulFunctionCall('return', [
-          YulLiteral('0', YulLiteralKind.number),
-          YulLiteral('$size', YulLiteralKind.number),
-        ]),
-      );
+    YulFunctionCall('return', [
+      YulLiteral('0', YulLiteralKind.number),
+      YulLiteral('$size', YulLiteralKind.number),
+    ]),
+  );
 
   /// Decodes the [index]-th statically-encoded argument.
   ///
@@ -982,25 +1035,38 @@ class IRGenerator {
 
   /// `keccak256(key . slot)` — the value slot of `mapping[key]`.
   String _mappingSlotHelper() => _register(
-        'mapping_slot',
-        () => YulFunctionDefinition('mapping_slot', ['key', 'slot'], ['result'],
-            YulBlock([
-              _callStmt('mstore', [_n('0'), _id('key')]),
-              _callStmt('mstore', [_n('0x20'), _id('slot')]),
-              YulAssignment(['result'], _c('keccak256', [_n('0'), _n('0x40')])),
-            ])),
-      );
+    'mapping_slot',
+    () => YulFunctionDefinition(
+      'mapping_slot',
+      ['key', 'slot'],
+      ['result'],
+      YulBlock([
+        _callStmt('mstore', [_n('0'), _id('key')]),
+        _callStmt('mstore', [_n('0x20'), _id('slot')]),
+        YulAssignment(['result'], _c('keccak256', [_n('0'), _n('0x40')])),
+      ]),
+    ),
+  );
 
   /// `keccak256(slot) + index` — the element slot of a dynamic array.
   String _dynArraySlotHelper() => _register(
-        'dyn_array_slot',
-        () => YulFunctionDefinition('dyn_array_slot', ['slot', 'index'],
-            ['result'], YulBlock([
-              _callStmt('mstore', [_n('0'), _id('slot')]),
-              YulAssignment(['result'],
-                  _c('add', [_c('keccak256', [_n('0'), _n('0x20')]), _id('index')])),
-            ])),
-      );
+    'dyn_array_slot',
+    () => YulFunctionDefinition(
+      'dyn_array_slot',
+      ['slot', 'index'],
+      ['result'],
+      YulBlock([
+        _callStmt('mstore', [_n('0'), _id('slot')]),
+        YulAssignment(
+          ['result'],
+          _c('add', [
+            _c('keccak256', [_n('0'), _n('0x20')]),
+            _id('index'),
+          ]),
+        ),
+      ]),
+    ),
+  );
 
   // ── Built-in value functions ───────────────────────────────────────────────
 
@@ -1032,12 +1098,18 @@ class IRGenerator {
     final name = typeName.name;
     if (name == 'bool') return value;
     if (name == 'address' || name == 'address payable') {
-      return YulFunctionCall('and', [value, YulLiteral(_maskHex(160), YulLiteralKind.number)]);
+      return YulFunctionCall('and', [
+        value,
+        YulLiteral(_maskHex(160), YulLiteralKind.number),
+      ]);
     }
     if (name.startsWith('uint')) {
       final bits = typeName.intWidth == 0 ? 256 : typeName.intWidth;
       if (bits >= 256) return value;
-      return YulFunctionCall('and', [value, YulLiteral(_maskHex(bits), YulLiteralKind.number)]);
+      return YulFunctionCall('and', [
+        value,
+        YulLiteral(_maskHex(bits), YulLiteralKind.number),
+      ]);
     }
     if (name.startsWith('int')) {
       final bits = typeName.intWidth == 0 ? 256 : typeName.intWidth;
@@ -1064,11 +1136,16 @@ class IRGenerator {
     final name = 'panic_0x${code.toRadixString(16)}';
     return _register(
       name,
-      () => YulFunctionDefinition(name, const [], const [], YulBlock([
-        _callStmt('mstore', [_n('0'), _n(_selectorWord(0x4e487b71))]),
-        _callStmt('mstore', [_n('4'), _n('0x${code.toRadixString(16)}')]),
-        _callStmt('revert', [_n('0'), _n('0x24')]),
-      ])),
+      () => YulFunctionDefinition(
+        name,
+        const [],
+        const [],
+        YulBlock([
+          _callStmt('mstore', [_n('0'), _n(_selectorWord(0x4e487b71))]),
+          _callStmt('mstore', [_n('4'), _n('0x${code.toRadixString(16)}')]),
+          _callStmt('revert', [_n('0'), _n('0x24')]),
+        ]),
+      ),
     );
   }
 
@@ -1077,13 +1154,17 @@ class IRGenerator {
     final kind = op == '+'
         ? 'add'
         : op == '-'
-            ? 'sub'
-            : 'mul';
+        ? 'sub'
+        : 'mul';
     final name = 'checked_${kind}_${t.abiType}';
     return _register(name, () => _buildCheckedArith(name, kind, t));
   }
 
-  YulFunctionDefinition _buildCheckedArith(String name, String kind, IntType t) {
+  YulFunctionDefinition _buildCheckedArith(
+    String name,
+    String kind,
+    IntType t,
+  ) {
     final w = t.bits;
     final panic = _panic(0x11);
     final body = <YulStatement>[
@@ -1092,19 +1173,30 @@ class IRGenerator {
     if (!t.signed) {
       switch (kind) {
         case 'add':
-          body.add(w == 256
-              ? _ifPanic(_c('gt', [_id('x'), _id('r')]), panic) // r < x
-              : _ifPanic(_c('gt', [_id('r'), _n(_maxHex(t))]), panic));
+          body.add(
+            w == 256
+                ? _ifPanic(_c('gt', [_id('x'), _id('r')]), panic) // r < x
+                : _ifPanic(_c('gt', [_id('r'), _n(_maxHex(t))]), panic),
+          );
         case 'sub':
           body.add(_ifPanic(_c('gt', [_id('y'), _id('x')]), panic)); // y > x
         case 'mul':
-          body.add(_ifPanic(
-            _c('and', [
-              _c('iszero', [_c('iszero', [_id('x')])]),
-              _c('iszero', [_c('eq', [_c('div', [_id('r'), _id('x')]), _id('y')])]),
-            ]),
-            panic,
-          ));
+          body.add(
+            _ifPanic(
+              _c('and', [
+                _c('iszero', [
+                  _c('iszero', [_id('x')]),
+                ]),
+                _c('iszero', [
+                  _c('eq', [
+                    _c('div', [_id('r'), _id('x')]),
+                    _id('y'),
+                  ]),
+                ]),
+              ]),
+              panic,
+            ),
+          );
           if (w < 256) {
             body.add(_ifPanic(_c('gt', [_id('r'), _n(_maxHex(t))]), panic));
           }
@@ -1112,39 +1204,71 @@ class IRGenerator {
     } else {
       switch (kind) {
         case 'add':
-          body.add(w == 256
-              ? _ifPanic(
-                  _c('or', [
-                    _c('and', [_c('sgt', [_id('y'), _n('0')]), _c('slt', [_id('r'), _id('x')])]),
-                    _c('and', [_c('slt', [_id('y'), _n('0')]), _c('sgt', [_id('r'), _id('x')])]),
-                  ]),
-                  panic)
-              : _ifPanic(_signedOutOfRange('r', t), panic));
+          body.add(
+            w == 256
+                ? _ifPanic(
+                    _c('or', [
+                      _c('and', [
+                        _c('sgt', [_id('y'), _n('0')]),
+                        _c('slt', [_id('r'), _id('x')]),
+                      ]),
+                      _c('and', [
+                        _c('slt', [_id('y'), _n('0')]),
+                        _c('sgt', [_id('r'), _id('x')]),
+                      ]),
+                    ]),
+                    panic,
+                  )
+                : _ifPanic(_signedOutOfRange('r', t), panic),
+          );
         case 'sub':
-          body.add(w == 256
-              ? _ifPanic(
-                  _c('or', [
-                    _c('and', [_c('iszero', [_c('slt', [_id('y'), _n('0')])]), _c('sgt', [_id('r'), _id('x')])]),
-                    _c('and', [_c('slt', [_id('y'), _n('0')]), _c('slt', [_id('r'), _id('x')])]),
-                  ]),
-                  panic)
-              : _ifPanic(_signedOutOfRange('r', t), panic));
+          body.add(
+            w == 256
+                ? _ifPanic(
+                    _c('or', [
+                      _c('and', [
+                        _c('iszero', [
+                          _c('slt', [_id('y'), _n('0')]),
+                        ]),
+                        _c('sgt', [_id('r'), _id('x')]),
+                      ]),
+                      _c('and', [
+                        _c('slt', [_id('y'), _n('0')]),
+                        _c('slt', [_id('r'), _id('x')]),
+                      ]),
+                    ]),
+                    panic,
+                  )
+                : _ifPanic(_signedOutOfRange('r', t), panic),
+          );
         case 'mul':
-          body.add(_ifPanic(
-            _c('and', [
-              _c('iszero', [_c('iszero', [_id('x')])]),
-              _c('iszero', [_c('eq', [_c('sdiv', [_id('r'), _id('x')]), _id('y')])]),
-            ]),
-            panic,
-          ));
-          body.add(w == 256
-              ? _ifPanic(
-                  _c('and', [
-                    _c('eq', [_id('x'), _n(_minusOneHex)]),
-                    _c('eq', [_id('y'), _n(_minHex(t))]),
+          body.add(
+            _ifPanic(
+              _c('and', [
+                _c('iszero', [
+                  _c('iszero', [_id('x')]),
+                ]),
+                _c('iszero', [
+                  _c('eq', [
+                    _c('sdiv', [_id('r'), _id('x')]),
+                    _id('y'),
                   ]),
-                  panic)
-              : _ifPanic(_signedOutOfRange('r', t), panic));
+                ]),
+              ]),
+              panic,
+            ),
+          );
+          body.add(
+            w == 256
+                ? _ifPanic(
+                    _c('and', [
+                      _c('eq', [_id('x'), _n(_minusOneHex)]),
+                      _c('eq', [_id('y'), _n(_minHex(t))]),
+                    ]),
+                    panic,
+                  )
+                : _ifPanic(_signedOutOfRange('r', t), panic),
+          );
       }
     }
     return YulFunctionDefinition(name, ['x', 'y'], ['r'], YulBlock(body));
@@ -1161,19 +1285,25 @@ class IRGenerator {
   }
 
   YulFunctionDefinition _buildCheckedDivMod(
-      String name, String op, String yulOp, IntType t) {
+    String name,
+    String op,
+    String yulOp,
+    IntType t,
+  ) {
     final isDiv = op == '/';
     final body = <YulStatement>[
       _ifPanic(_c('iszero', [_id('y')]), _panic(0x12)),
     ];
     if (t.signed && isDiv && t.bits == 256) {
-      body.add(_ifPanic(
-        _c('and', [
-          _c('eq', [_id('x'), _n(_minHex(t))]),
-          _c('eq', [_id('y'), _n(_minusOneHex)]),
-        ]),
-        _panic(0x11),
-      ));
+      body.add(
+        _ifPanic(
+          _c('and', [
+            _c('eq', [_id('x'), _n(_minHex(t))]),
+            _c('eq', [_id('y'), _n(_minusOneHex)]),
+          ]),
+          _panic(0x11),
+        ),
+      );
     }
     body.add(YulAssignment(['r'], _c(yulOp, [_id('x'), _id('y')])));
     if (t.signed && isDiv && t.bits < 256) {
@@ -1183,9 +1313,9 @@ class IRGenerator {
   }
 
   YulExpression _signedOutOfRange(String v, IntType t) => _c('or', [
-        _c('sgt', [_id(v), _n(_maxHex(t))]),
-        _c('slt', [_id(v), _n(_minHex(t))]),
-      ]);
+    _c('sgt', [_id(v), _n(_maxHex(t))]),
+    _c('slt', [_id(v), _n(_minHex(t))]),
+  ]);
 
   // ── Revert helpers ─────────────────────────────────────────────────────────
 
@@ -1204,7 +1334,10 @@ class IRGenerator {
       _callStmt('mstore', [_n('4'), _n('0x20')]),
       _callStmt('mstore', [_n('0x24'), _n('$len')]),
       for (var i = 0; i < chunks; i++)
-        _callStmt('mstore', [_n('${0x44 + i * 32}'), _n(_dataWord(bytes, i * 32))]),
+        _callStmt('mstore', [
+          _n('${0x44 + i * 32}'),
+          _n(_dataWord(bytes, i * 32)),
+        ]),
       _revertCall(0, 0x44 + chunks * 0x20),
     ];
     return stmts;
@@ -1222,7 +1355,8 @@ class IRGenerator {
   // ── Yul construction shorthands ─────────────────────────────────────────────
 
   static YulIdentifier _id(String name) => YulIdentifier(name);
-  static YulLiteral _n(String value) => YulLiteral(value, YulLiteralKind.number);
+  static YulLiteral _n(String value) =>
+      YulLiteral(value, YulLiteralKind.number);
   static YulFunctionCall _c(String name, List<YulExpression> args) =>
       YulFunctionCall(name, args);
   static YulStatement _callStmt(String name, List<YulExpression> args) =>

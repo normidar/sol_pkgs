@@ -45,8 +45,7 @@ class CompilerStack {
         }
       }
     } on FatalErrorException catch (e) {
-      _diagnostics.error(e.diagnostic.message,
-          location: e.diagnostic.location);
+      _diagnostics.error(e.diagnostic.message, location: e.diagnostic.location);
     }
 
     return CompilationResult(
@@ -57,8 +56,10 @@ class CompilerStack {
 
   SourceFile? _parse(SourceUnit unit) {
     try {
-      final tokens = Lexer(source: unit.source, sourceIndex: unit.index)
-          .tokenize();
+      final tokens = Lexer(
+        source: unit.source,
+        sourceIndex: unit.index,
+      ).tokenize();
       return Parser(
         tokens: tokens,
         sourceIndex: unit.index,

@@ -20,20 +20,19 @@ FunctionDefinition _fn(
   List<Parameter> params = const [],
   List<Parameter> returns = const [],
   Block? body,
-}) =>
-    FunctionDefinition(
-      location: _loc(),
-      kind: FunctionKind.function,
-      name: name,
-      parameters: params,
-      returnParameters: returns,
-      visibility: Visibility.public,
-      stateMutability: StateMutability.nonpayable,
-      isVirtual: false,
-      overrideSpecifier: [],
-      modifiers: [],
-      body: body,
-    );
+}) => FunctionDefinition(
+  location: _loc(),
+  kind: FunctionKind.function,
+  name: name,
+  parameters: params,
+  returnParameters: returns,
+  visibility: Visibility.public,
+  stateMutability: StateMutability.nonpayable,
+  isVirtual: false,
+  overrideSpecifier: [],
+  modifiers: [],
+  body: body,
+);
 
 Parameter _param(String name, String typeName) =>
     Parameter(_loc(), ElementaryTypeName(_loc(), typeName), name, null);
@@ -48,12 +47,9 @@ VariableDeclarationStatement _varDecl(
   String name,
   String typeName, [
   Expression? init,
-]) =>
-    VariableDeclarationStatement(
-      _loc(),
-      [VariableDeclaration(_loc(), ElementaryTypeName(_loc(), typeName), name, null)],
-      init,
-    );
+]) => VariableDeclarationStatement(_loc(), [
+  VariableDeclaration(_loc(), ElementaryTypeName(_loc(), typeName), name, null),
+], init);
 
 DiagnosticCollector _newDiags() => DiagnosticCollector();
 
@@ -66,7 +62,11 @@ void main() {
     });
 
     test('simple chain A → B → C', () {
-      final bases = {'A': ['B'], 'B': ['C'], 'C': <String>[]};
+      final bases = {
+        'A': ['B'],
+        'B': ['C'],
+        'C': <String>[],
+      };
       expect(c3Linearise('A', (n) => bases[n]!), ['A', 'B', 'C']);
     });
 
@@ -81,7 +81,10 @@ void main() {
     });
 
     test('cycle throws', () {
-      final bases = {'A': ['B'], 'B': ['A']};
+      final bases = {
+        'A': ['B'],
+        'B': ['A'],
+      };
       expect(
         () => c3Linearise('A', (n) => bases[n]!),
         throwsA(isA<C3LinearisationError>()),
@@ -113,8 +116,11 @@ void main() {
         ]),
       ]);
       Resolver(diags).resolve(file);
-      expect(diags.diagnostics, isEmpty,
-          reason: 'forward reference to foo should resolve');
+      expect(
+        diags.diagnostics,
+        isEmpty,
+        reason: 'forward reference to foo should resolve',
+      );
       expect(callExpr.annotation, isNotNull);
     });
 
@@ -123,8 +129,7 @@ void main() {
       final ref = _id('x');
       final file = _sourceFile([
         _contract('C', [
-          _fn('getX',
-              body: _block([ReturnStatement(_loc(), ref)])),
+          _fn('getX', body: _block([ReturnStatement(_loc(), ref)])),
           StateVariableDeclaration(
             _loc(),
             ElementaryTypeName(_loc(), 'uint256'),
@@ -145,8 +150,12 @@ void main() {
       final ref = _id('Transfer');
       final file = _sourceFile([
         _contract('C', [
-          _fn('emit_',
-              body: _block([EmitStatement(_loc(), FunctionCall(_loc(), ref, [], []))])),
+          _fn(
+            'emit_',
+            body: _block([
+              EmitStatement(_loc(), FunctionCall(_loc(), ref, [], [])),
+            ]),
+          ),
           EventDefinition(_loc(), 'Transfer', [], false),
         ]),
       ]);
@@ -159,9 +168,12 @@ void main() {
       final ref = _id('MyError');
       final file = _sourceFile([
         _contract('C', [
-          _fn('f', body: _block([
-            RevertStatement(_loc(), FunctionCall(_loc(), ref, [], [])),
-          ])),
+          _fn(
+            'f',
+            body: _block([
+              RevertStatement(_loc(), FunctionCall(_loc(), ref, [], [])),
+            ]),
+          ),
           CustomErrorDefinition(_loc(), 'MyError', []),
         ]),
       ]);
@@ -212,10 +224,13 @@ void main() {
       final ref = _id('local');
       final file = _sourceFile([
         _contract('C', [
-          _fn('f', body: _block([
-            _varDecl('local', 'uint256', _lit('0')),
-            ExpressionStatement(_loc(), ref),
-          ])),
+          _fn(
+            'f',
+            body: _block([
+              _varDecl('local', 'uint256', _lit('0')),
+              ExpressionStatement(_loc(), ref),
+            ]),
+          ),
         ]),
       ]);
       Resolver(diags).resolve(file);
@@ -228,9 +243,11 @@ void main() {
       final ref = _id('a');
       final file = _sourceFile([
         _contract('C', [
-          _fn('f',
-              params: [_param('a', 'uint256')],
-              body: _block([ReturnStatement(_loc(), ref)])),
+          _fn(
+            'f',
+            params: [_param('a', 'uint256')],
+            body: _block([ReturnStatement(_loc(), ref)]),
+          ),
         ]),
       ]);
       Resolver(diags).resolve(file);
@@ -243,12 +260,16 @@ void main() {
       final ref = _id('result');
       final file = _sourceFile([
         _contract('C', [
-          _fn('f',
-              returns: [_param('result', 'uint256')],
-              body: _block([
-                ExpressionStatement(_loc(),
-                    Assignment(_loc(), '=', ref, _lit('42'))),
-              ])),
+          _fn(
+            'f',
+            returns: [_param('result', 'uint256')],
+            body: _block([
+              ExpressionStatement(
+                _loc(),
+                Assignment(_loc(), '=', ref, _lit('42')),
+              ),
+            ]),
+          ),
         ]),
       ]);
       Resolver(diags).resolve(file);
@@ -259,17 +280,23 @@ void main() {
       final diags = _newDiags();
       final file = _sourceFile([
         _contract('C', [
-          _fn('f', body: _block([
-            ExpressionStatement(_loc(), _id('msg')),
-            ExpressionStatement(_loc(), _id('block')),
-            ExpressionStatement(_loc(), _id('this')),
-            ExpressionStatement(_loc(), _id('super')),
-          ])),
+          _fn(
+            'f',
+            body: _block([
+              ExpressionStatement(_loc(), _id('msg')),
+              ExpressionStatement(_loc(), _id('block')),
+              ExpressionStatement(_loc(), _id('this')),
+              ExpressionStatement(_loc(), _id('super')),
+            ]),
+          ),
         ]),
       ]);
       Resolver(diags).resolve(file);
-      expect(diags.diagnostics, isEmpty,
-          reason: 'built-in names should not cause undeclared errors');
+      expect(
+        diags.diagnostics,
+        isEmpty,
+        reason: 'built-in names should not cause undeclared errors',
+      );
     });
 
     test('local variable not visible outside its block', () {
@@ -277,15 +304,21 @@ void main() {
       final ref = _id('inner');
       final file = _sourceFile([
         _contract('C', [
-          _fn('f', body: _block([
-            _block([_varDecl('inner', 'uint256')]),
-            ExpressionStatement(_loc(), ref), // out-of-scope use
-          ])),
+          _fn(
+            'f',
+            body: _block([
+              _block([_varDecl('inner', 'uint256')]),
+              ExpressionStatement(_loc(), ref), // out-of-scope use
+            ]),
+          ),
         ]),
       ]);
       Resolver(diags).resolve(file);
-      expect(diags.diagnostics, isNotEmpty,
-          reason: 'inner should be out of scope here');
+      expect(
+        diags.diagnostics,
+        isNotEmpty,
+        reason: 'inner should be out of scope here',
+      );
     });
 
     test('if statement visits condition and branches', () {
@@ -293,13 +326,15 @@ void main() {
       final cond = _id('flag');
       final file = _sourceFile([
         _contract('C', [
-          StateVariableDeclaration(_loc(), ElementaryTypeName(_loc(), 'bool'),
-              'flag', Visibility.public, VariableMutability.mutable, null),
-          _fn('f', body: _block([
-            IfStatement(_loc(), cond,
-                _block([]),
-                null),
-          ])),
+          StateVariableDeclaration(
+            _loc(),
+            ElementaryTypeName(_loc(), 'bool'),
+            'flag',
+            Visibility.public,
+            VariableMutability.mutable,
+            null,
+          ),
+          _fn('f', body: _block([IfStatement(_loc(), cond, _block([]), null)])),
         ]),
       ]);
       Resolver(diags).resolve(file);
@@ -314,7 +349,9 @@ void main() {
     SolType _check(Expression expr) {
       final diags = _newDiags();
       final fn = _fn('f', body: _block([ReturnStatement(_loc(), expr)]));
-      final file = _sourceFile([_contract('C', [fn])]);
+      final file = _sourceFile([
+        _contract('C', [fn]),
+      ]);
       Resolver(diags).resolve(file);
       TypeChecker(diags).check(file);
       return expr.annotation is SolType
@@ -371,9 +408,7 @@ void main() {
       final cond = Literal(_loc(), LiteralKind.bool$, 'true', null);
       final file = _sourceFile([
         _contract('C', [
-          _fn('f', body: _block([
-            IfStatement(_loc(), cond, _block([]), null),
-          ])),
+          _fn('f', body: _block([IfStatement(_loc(), cond, _block([]), null)])),
         ]),
       ]);
       Resolver(diags).resolve(file);
@@ -386,7 +421,9 @@ void main() {
       final diags = _newDiags();
       final varDecl = _varDecl('x', 'uint256', _lit('0'));
       final file = _sourceFile([
-        _contract('C', [_fn('f', body: _block([varDecl]))]),
+        _contract('C', [
+          _fn('f', body: _block([varDecl])),
+        ]),
       ]);
       Resolver(diags).resolve(file);
       TypeChecker(diags).check(file);
@@ -397,10 +434,14 @@ void main() {
     test('resolver assigns the declared (signed) type to a parameter', () {
       final diags = _newDiags();
       final id = _id('x');
-      final fn = _fn('f',
-          params: [_param('x', 'int128')],
-          body: _block([ExpressionStatement(_loc(), id)]));
-      final file = _sourceFile([_contract('C', [fn])]);
+      final fn = _fn(
+        'f',
+        params: [_param('x', 'int128')],
+        body: _block([ExpressionStatement(_loc(), id)]),
+      );
+      final file = _sourceFile([
+        _contract('C', [fn]),
+      ]);
       Resolver(diags).resolve(file);
       TypeChecker(diags).check(file);
       final t = id.annotation;
@@ -414,15 +455,22 @@ void main() {
       // so `x - 1` with `int256 x` must not raise a type-mismatch error.
       final diags = _newDiags();
       final expr = BinaryOperation(_loc(), '-', _id('x'), _lit('1'));
-      final fn = _fn('f',
-          params: [_param('x', 'int256')],
-          returns: [_param('', 'int256')],
-          body: _block([ReturnStatement(_loc(), expr)]));
-      final file = _sourceFile([_contract('C', [fn])]);
+      final fn = _fn(
+        'f',
+        params: [_param('x', 'int256')],
+        returns: [_param('', 'int256')],
+        body: _block([ReturnStatement(_loc(), expr)]),
+      );
+      final file = _sourceFile([
+        _contract('C', [fn]),
+      ]);
       Resolver(diags).resolve(file);
       TypeChecker(diags).check(file);
-      expect(diags.diagnostics.where((d) => d.isError), isEmpty,
-          reason: 'literal should adapt to int256');
+      expect(
+        diags.diagnostics.where((d) => d.isError),
+        isEmpty,
+        reason: 'literal should adapt to int256',
+      );
       final t = expr.annotation;
       expect(t, isA<IntType>());
       expect((t as IntType).signed, isTrue);

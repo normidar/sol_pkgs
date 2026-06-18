@@ -1,8 +1,7 @@
 import 'package:sol_lexer/sol_lexer.dart';
 import 'package:test/test.dart';
 
-List<Token> scan(String src) =>
-    Lexer(source: src, sourceIndex: 0).tokenize();
+List<Token> scan(String src) => Lexer(source: src, sourceIndex: 0).tokenize();
 
 void main() {
   group('Lexer – keywords', () {

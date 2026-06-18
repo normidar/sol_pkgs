@@ -33,8 +33,12 @@ class YulPrinter {
         _writeIndent();
         _write('}');
 
-      case YulFunctionDefinition(:final name, :final parameters,
-              :final returnVariables, :final body):
+      case YulFunctionDefinition(
+        :final name,
+        :final parameters,
+        :final returnVariables,
+        :final body,
+      ):
         _write('function $name(${parameters.join(', ')})');
         if (returnVariables.isNotEmpty) {
           _write(' -> ${returnVariables.join(', ')}');

@@ -44,35 +44,48 @@ class DiagnosticCollector {
   }
 
   void info(String msg, {SourceLocation location = SourceLocation.invalid}) =>
-      add(Diagnostic(
-          severity: Severity.info, message: msg, location: location));
+      add(
+        Diagnostic(severity: Severity.info, message: msg, location: location),
+      );
 
-  void warning(String msg,
-          {SourceLocation location = SourceLocation.invalid,
-          int? errorCode}) =>
-      add(Diagnostic(
-          severity: Severity.warning,
-          message: msg,
-          location: location,
-          errorCode: errorCode));
+  void warning(
+    String msg, {
+    SourceLocation location = SourceLocation.invalid,
+    int? errorCode,
+  }) => add(
+    Diagnostic(
+      severity: Severity.warning,
+      message: msg,
+      location: location,
+      errorCode: errorCode,
+    ),
+  );
 
-  void error(String msg,
-          {SourceLocation location = SourceLocation.invalid,
-          int? errorCode}) =>
-      add(Diagnostic(
-          severity: Severity.error,
-          message: msg,
-          location: location,
-          errorCode: errorCode));
+  void error(
+    String msg, {
+    SourceLocation location = SourceLocation.invalid,
+    int? errorCode,
+  }) => add(
+    Diagnostic(
+      severity: Severity.error,
+      message: msg,
+      location: location,
+      errorCode: errorCode,
+    ),
+  );
 
-  void fatalError(String msg,
-          {SourceLocation location = SourceLocation.invalid,
-          int? errorCode}) =>
-      add(Diagnostic(
-          severity: Severity.fatalError,
-          message: msg,
-          location: location,
-          errorCode: errorCode));
+  void fatalError(
+    String msg, {
+    SourceLocation location = SourceLocation.invalid,
+    int? errorCode,
+  }) => add(
+    Diagnostic(
+      severity: Severity.fatalError,
+      message: msg,
+      location: location,
+      errorCode: errorCode,
+    ),
+  );
 }
 
 class FatalErrorException implements Exception {

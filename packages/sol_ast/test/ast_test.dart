@@ -36,7 +36,12 @@ void main() {
         body: Block(loc, [
           ReturnStatement(
             loc,
-            BinaryOperation(loc, '+', Identifier(loc, 'a'), Identifier(loc, 'b')),
+            BinaryOperation(
+              loc,
+              '+',
+              Identifier(loc, 'a'),
+              Identifier(loc, 'b'),
+            ),
           ),
         ]),
       );

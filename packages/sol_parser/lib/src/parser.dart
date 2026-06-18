@@ -25,10 +25,9 @@ class Parser {
 
   Token get _cur => _pos < tokens.length ? tokens[_pos] : _eofToken;
   Token get _eofToken => Token(
-        kind: TokenKind.Eof,
-        location: SourceLocation(
-            sourceIndex: sourceIndex, offset: 0, length: 0),
-      );
+    kind: TokenKind.Eof,
+    location: SourceLocation(sourceIndex: sourceIndex, offset: 0, length: 0),
+  );
 
   // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -52,13 +51,18 @@ class Parser {
         ])) {
           contracts.add(_parseContractDefinition());
         } else {
-          _errorAndSync('Unexpected token "${_cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme}" at top level');
+          _errorAndSync(
+            'Unexpected token "${_cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme}" at top level',
+          );
         }
       } on _ParseError {
         _synchronize({
-          TokenKind.kContract, TokenKind.kInterface,
-          TokenKind.kLibrary, TokenKind.kAbstract,
-          TokenKind.kPragma, TokenKind.kImport,
+          TokenKind.kContract,
+          TokenKind.kInterface,
+          TokenKind.kLibrary,
+          TokenKind.kAbstract,
+          TokenKind.kPragma,
+          TokenKind.kImport,
         });
       }
     }
@@ -72,8 +76,7 @@ class Parser {
     final start = _expect(TokenKind.kPragma).location;
     final literals = <String>[];
     while (!_at(TokenKind.Semicolon) && !_isEof) {
-      literals.add(
-          _cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme);
+      literals.add(_cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme);
       _advance();
     }
     _expect(TokenKind.Semicolon);
@@ -160,7 +163,11 @@ class Parser {
     _expect(TokenKind.RBrace);
 
     return ContractDefinition(
-      _locFrom(start), kind, name, bases, members,
+      _locFrom(start),
+      kind,
+      name,
+      bases,
+      members,
       isAbstract: isAbstract,
     );
   }
@@ -224,21 +231,29 @@ class Parser {
     while (true) {
       switch (_cur.kind) {
         case TokenKind.kPublic:
-          visibility = Visibility.public; _advance();
+          visibility = Visibility.public;
+          _advance();
         case TokenKind.kPrivate:
-          visibility = Visibility.private; _advance();
+          visibility = Visibility.private;
+          _advance();
         case TokenKind.kInternal:
-          visibility = Visibility.internal; _advance();
+          visibility = Visibility.internal;
+          _advance();
         case TokenKind.kExternal:
-          visibility = Visibility.external; _advance();
+          visibility = Visibility.external;
+          _advance();
         case TokenKind.kPure:
-          mutability = StateMutability.pure; _advance();
+          mutability = StateMutability.pure;
+          _advance();
         case TokenKind.kView:
-          mutability = StateMutability.view; _advance();
+          mutability = StateMutability.view;
+          _advance();
         case TokenKind.kPayable:
-          mutability = StateMutability.payable; _advance();
+          mutability = StateMutability.payable;
+          _advance();
         case TokenKind.kVirtual:
-          isVirtual = true; _advance();
+          isVirtual = true;
+          _advance();
         case TokenKind.kOverride:
           _advance();
           if (_tryConsume(TokenKind.LParen)) {
@@ -310,10 +325,9 @@ class Parser {
       }
       String? pName;
       if (_isIdentifier()) pName = _advance().lexeme;
-      params.add(Parameter(
-        _locFrom(pStart), type, pName, loc,
-        indexed: indexed,
-      ));
+      params.add(
+        Parameter(_locFrom(pStart), type, pName, loc, indexed: indexed),
+      );
     } while (_tryConsume(TokenKind.Comma));
     return params;
   }
@@ -332,7 +346,10 @@ class Parser {
     var isVirtual = false;
     final overrides = <String>[];
     while (true) {
-      if (_tryConsume(TokenKind.kVirtual)) { isVirtual = true; continue; }
+      if (_tryConsume(TokenKind.kVirtual)) {
+        isVirtual = true;
+        continue;
+      }
       if (_at(TokenKind.kOverride)) {
         _advance();
         if (_tryConsume(TokenKind.LParen)) {
@@ -346,7 +363,10 @@ class Parser {
     }
     final body = _parseBlock();
     return ModifierDefinition(
-      _locFrom(start), name, params, body,
+      _locFrom(start),
+      name,
+      params,
+      body,
       isVirtual: isVirtual,
       overrideSpecifier: overrides,
     );
@@ -415,8 +435,10 @@ class Parser {
     final libName = _qualifiedName();
     _expect(TokenKind.kFor);
     TypeName? forType;
-    if (!_at(TokenKind.Star)) forType = _parseTypeName();
-    else _advance();
+    if (!_at(TokenKind.Star))
+      forType = _parseTypeName();
+    else
+      _advance();
     _expect(TokenKind.Semicolon);
     return UsingDirective(_locFrom(start), libName, forType);
   }
@@ -444,15 +466,20 @@ class Parser {
     while (true) {
       switch (_cur.kind) {
         case TokenKind.kPublic:
-          visibility = Visibility.public; _advance();
+          visibility = Visibility.public;
+          _advance();
         case TokenKind.kPrivate:
-          visibility = Visibility.private; _advance();
+          visibility = Visibility.private;
+          _advance();
         case TokenKind.kInternal:
-          visibility = Visibility.internal; _advance();
+          visibility = Visibility.internal;
+          _advance();
         case TokenKind.kImmutable:
-          mutability = VariableMutability.immutable; _advance();
+          mutability = VariableMutability.immutable;
+          _advance();
         case TokenKind.kConstant:
-          mutability = VariableMutability.constant; _advance();
+          mutability = VariableMutability.constant;
+          _advance();
         case TokenKind.kOverride:
           _advance();
           if (_tryConsume(TokenKind.LParen)) {
@@ -470,7 +497,13 @@ class Parser {
     if (_tryConsume(TokenKind.Eq)) init = _parseExpression();
     _expect(TokenKind.Semicolon);
     return StateVariableDeclaration(
-        _locFrom(start), type, name, visibility, mutability, init);
+      _locFrom(start),
+      type,
+      name,
+      visibility,
+      mutability,
+      init,
+    );
   }
 
   // ── Statements ─────────────────────────────────────────────────────────────
@@ -601,12 +634,7 @@ class Parser {
       final loc = _locFrom(start);
       return RevertStatement(
         loc,
-        FunctionCall(
-          loc,
-          Identifier(loc, 'revert'),
-          const [],
-          const [],
-        ),
+        FunctionCall(loc, Identifier(loc, 'revert'), const [], const []),
       );
     }
     final expr = _parseExpression();
@@ -742,10 +770,18 @@ class Parser {
   Expression _parseAssignment() {
     final left = _parseTernary();
     const assignOps = {
-      TokenKind.Eq, TokenKind.PlusEq, TokenKind.MinusEq,
-      TokenKind.StarEq, TokenKind.SlashEq, TokenKind.PercentEq,
-      TokenKind.AmpEq, TokenKind.PipeEq, TokenKind.CaretEq,
-      TokenKind.LtLtEq, TokenKind.GtGtEq, TokenKind.GtGtGtEq,
+      TokenKind.Eq,
+      TokenKind.PlusEq,
+      TokenKind.MinusEq,
+      TokenKind.StarEq,
+      TokenKind.SlashEq,
+      TokenKind.PercentEq,
+      TokenKind.AmpEq,
+      TokenKind.PipeEq,
+      TokenKind.CaretEq,
+      TokenKind.LtLtEq,
+      TokenKind.GtGtEq,
+      TokenKind.GtGtGtEq,
     };
     if (assignOps.contains(_cur.kind)) {
       final op = _advance().lexeme;
@@ -789,7 +825,11 @@ class Parser {
       final op = _advance().lexeme;
       final right = _parseBinaryAt(level + 1);
       left = BinaryOperation(
-          left.location.combine(right.location), op, left, right);
+        left.location.combine(right.location),
+        op,
+        left,
+        right,
+      );
     }
     return left;
   }
@@ -902,9 +942,14 @@ class Parser {
         final val = _advance().lexeme;
         String? sub;
         if (_atAny([
-          TokenKind.kWei, TokenKind.kGwei, TokenKind.kEther,
-          TokenKind.kSeconds, TokenKind.kMinutes, TokenKind.kHours,
-          TokenKind.kDays, TokenKind.kWeeks,
+          TokenKind.kWei,
+          TokenKind.kGwei,
+          TokenKind.kEther,
+          TokenKind.kSeconds,
+          TokenKind.kMinutes,
+          TokenKind.kHours,
+          TokenKind.kDays,
+          TokenKind.kWeeks,
         ])) {
           sub = _advance().lexeme;
         }
@@ -914,15 +959,28 @@ class Parser {
         // Concatenated string literals: `"a" "b"` → one node.
         final buf = StringBuffer(_advance().lexeme);
         while (_at(TokenKind.StringLiteral)) buf.write(_advance().lexeme);
-        return Literal(_locFrom(start), LiteralKind.string, buf.toString(), null);
+        return Literal(
+          _locFrom(start),
+          LiteralKind.string,
+          buf.toString(),
+          null,
+        );
 
       case TokenKind.UnicodeStringLiteral:
         return Literal(
-            _locFrom(start), LiteralKind.unicodeString, _advance().lexeme, null);
+          _locFrom(start),
+          LiteralKind.unicodeString,
+          _advance().lexeme,
+          null,
+        );
 
       case TokenKind.HexStringLiteral:
         return Literal(
-            _locFrom(start), LiteralKind.hexString, _advance().lexeme, null);
+          _locFrom(start),
+          LiteralKind.hexString,
+          _advance().lexeme,
+          null,
+        );
 
       case TokenKind.TrueLiteral:
         _advance();
@@ -1043,7 +1101,10 @@ class Parser {
       // `address payable`
       if (name == 'address' && _tryConsume(TokenKind.kPayable)) {
         return ElementaryTypeName(
-            _locFrom(start), 'address payable', intWidth: 0);
+          _locFrom(start),
+          'address payable',
+          intWidth: 0,
+        );
       }
       base = ElementaryTypeName(_locFrom(start), name, intWidth: width);
     } else {
@@ -1077,14 +1138,29 @@ class Parser {
     var mut = StateMutability.nonpayable;
     while (true) {
       switch (_cur.kind) {
-        case TokenKind.kPublic: vis = Visibility.public; _advance();
-        case TokenKind.kExternal: vis = Visibility.external; _advance();
-        case TokenKind.kInternal: vis = Visibility.internal; _advance();
-        case TokenKind.kPrivate: vis = Visibility.private; _advance();
-        case TokenKind.kPure: mut = StateMutability.pure; _advance();
-        case TokenKind.kView: mut = StateMutability.view; _advance();
-        case TokenKind.kPayable: mut = StateMutability.payable; _advance();
-        default: break;
+        case TokenKind.kPublic:
+          vis = Visibility.public;
+          _advance();
+        case TokenKind.kExternal:
+          vis = Visibility.external;
+          _advance();
+        case TokenKind.kInternal:
+          vis = Visibility.internal;
+          _advance();
+        case TokenKind.kPrivate:
+          vis = Visibility.private;
+          _advance();
+        case TokenKind.kPure:
+          mut = StateMutability.pure;
+          _advance();
+        case TokenKind.kView:
+          mut = StateMutability.view;
+          _advance();
+        case TokenKind.kPayable:
+          mut = StateMutability.payable;
+          _advance();
+        default:
+          break;
       }
       break;
     }
@@ -1118,7 +1194,10 @@ class Parser {
   }
 
   bool _tryConsume(TokenKind kind) {
-    if (_cur.kind == kind) { _advance(); return true; }
+    if (_cur.kind == kind) {
+      _advance();
+      return true;
+    }
     return false;
   }
 
@@ -1146,15 +1225,21 @@ class Parser {
 
   DataLocation? _tryParseDataLocation() {
     switch (_cur.kind) {
-      case TokenKind.kStorage: _advance(); return DataLocation.storage;
-      case TokenKind.kMemory: _advance(); return DataLocation.memory;
-      case TokenKind.kCalldata: _advance(); return DataLocation.calldata;
-      default: return null;
+      case TokenKind.kStorage:
+        _advance();
+        return DataLocation.storage;
+      case TokenKind.kMemory:
+        _advance();
+        return DataLocation.memory;
+      case TokenKind.kCalldata:
+        _advance();
+        return DataLocation.calldata;
+      default:
+        return null;
     }
   }
 
-  SourceLocation _locFrom(SourceLocation start) =>
-      start.combine(_cur.location);
+  SourceLocation _locFrom(SourceLocation start) => start.combine(_cur.location);
 
   /// Attempts [parse] speculatively: on a parse error, rewinds the token
   /// stream and returns null without recording any diagnostics. Used to
@@ -1204,25 +1289,25 @@ class Parser {
   }
 
   static bool _isElementaryType(TokenKind k) => const {
-        TokenKind.kAddress,
-        TokenKind.kBool,
-        TokenKind.kString,
-        TokenKind.kBytes,
-        TokenKind.kInt,
-        TokenKind.kUint,
-        TokenKind.IntN,
-        TokenKind.UintN,
-        TokenKind.BytesN,
-      }.contains(k);
+    TokenKind.kAddress,
+    TokenKind.kBool,
+    TokenKind.kString,
+    TokenKind.kBytes,
+    TokenKind.kInt,
+    TokenKind.kUint,
+    TokenKind.IntN,
+    TokenKind.UintN,
+    TokenKind.BytesN,
+  }.contains(k);
 
   /// Keywords that Solidity allows as identifiers in certain positions
   /// (member names, event names, etc.).
   static bool _isKeywordUsableAsIdentifier(TokenKind k) => const {
-        TokenKind.kFrom,
-        TokenKind.kError,
-        TokenKind.kRevert,
-        TokenKind.kType,
-      }.contains(k);
+    TokenKind.kFrom,
+    TokenKind.kError,
+    TokenKind.kRevert,
+    TokenKind.kType,
+  }.contains(k);
 
   TokenKind _peekKind(int offset) {
     final i = _pos + offset;
@@ -1233,4 +1318,3 @@ class Parser {
 // ── Internal error class for structured error recovery ────────────────────────
 
 class _ParseError implements Exception {}
-

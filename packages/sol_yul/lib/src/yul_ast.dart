@@ -25,7 +25,11 @@ class YulBlock extends YulStatement {
 
 class YulFunctionDefinition extends YulStatement {
   YulFunctionDefinition(
-      this.name, this.parameters, this.returnVariables, this.body);
+    this.name,
+    this.parameters,
+    this.returnVariables,
+    this.body,
+  );
 
   final String name;
   final List<String> parameters;

@@ -182,8 +182,8 @@ class TypeChecker extends AstVisitor {
     final common = _isNumberLiteral(node.left) && r is IntType
         ? r
         : _isNumberLiteral(node.right) && l is IntType
-            ? l
-            : commonType(l, r);
+        ? l
+        : commonType(l, r);
     if (common == null) {
       _diagnostics.error(
         'Operator "${node.operator$}" not compatible with types '
@@ -309,6 +309,10 @@ class TypeChecker extends AstVisitor {
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   static bool _isComparisonOp(String op) =>
-      op == '<' || op == '<=' || op == '>' || op == '>=' ||
-      op == '==' || op == '!=';
+      op == '<' ||
+      op == '<=' ||
+      op == '>' ||
+      op == '>=' ||
+      op == '==' ||
+      op == '!=';
 }

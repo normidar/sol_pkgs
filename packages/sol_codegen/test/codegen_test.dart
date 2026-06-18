@@ -7,36 +7,51 @@ import 'package:test/test.dart';
 const loc = SourceLocation(sourceIndex: 0, offset: 0, length: 0);
 
 ContractDefinition makeAdder() => ContractDefinition(
-      loc,
-      ContractKind.contract,
-      'Adder',
-      [],
-      [
-        FunctionDefinition(
-          location: loc,
-          kind: FunctionKind.function,
-          name: 'getSum',
-          parameters: [
-            Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), 'a', null),
-            Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), 'b', null),
-          ],
-          returnParameters: [
-            Parameter(loc, ElementaryTypeName(loc, 'uint256', intWidth: 256), null, null),
-          ],
-          visibility: Visibility.public,
-          stateMutability: StateMutability.pure,
-          isVirtual: false,
-          overrideSpecifier: [],
-          modifiers: [],
-          body: Block(loc, [
-            ReturnStatement(
-              loc,
-              BinaryOperation(loc, '+', Identifier(loc, 'a'), Identifier(loc, 'b')),
-            ),
-          ]),
+  loc,
+  ContractKind.contract,
+  'Adder',
+  [],
+  [
+    FunctionDefinition(
+      location: loc,
+      kind: FunctionKind.function,
+      name: 'getSum',
+      parameters: [
+        Parameter(
+          loc,
+          ElementaryTypeName(loc, 'uint256', intWidth: 256),
+          'a',
+          null,
+        ),
+        Parameter(
+          loc,
+          ElementaryTypeName(loc, 'uint256', intWidth: 256),
+          'b',
+          null,
         ),
       ],
-    );
+      returnParameters: [
+        Parameter(
+          loc,
+          ElementaryTypeName(loc, 'uint256', intWidth: 256),
+          null,
+          null,
+        ),
+      ],
+      visibility: Visibility.public,
+      stateMutability: StateMutability.pure,
+      isVirtual: false,
+      overrideSpecifier: [],
+      modifiers: [],
+      body: Block(loc, [
+        ReturnStatement(
+          loc,
+          BinaryOperation(loc, '+', Identifier(loc, 'a'), Identifier(loc, 'b')),
+        ),
+      ]),
+    ),
+  ],
+);
 
 void main() {
   group('IRGenerator', () {
@@ -63,28 +78,36 @@ void main() {
     });
 
     test('dispatcher uses the real keccak256 selector (B-5)', () {
-      final obj = IRGenerator(DiagnosticCollector()).generateContract(makeAdder());
+      final obj = IRGenerator(
+        DiagnosticCollector(),
+      ).generateContract(makeAdder());
       final yul = YulPrinter().print(obj);
       // keccak256("getSum(uint256,uint256)")[:4] == 0x8e86b125
       expect(yul, contains('case 0x8e86b125'));
     });
 
     test('decodes each argument at its own calldata offset (B-6)', () {
-      final obj = IRGenerator(DiagnosticCollector()).generateContract(makeAdder());
+      final obj = IRGenerator(
+        DiagnosticCollector(),
+      ).generateContract(makeAdder());
       final yul = YulPrinter().print(obj);
       expect(yul, contains('calldataload(4)')); // arg 0
       expect(yul, contains('calldataload(36)')); // arg 1
     });
 
     test('ABI-encodes the return value into memory then returns it', () {
-      final obj = IRGenerator(DiagnosticCollector()).generateContract(makeAdder());
+      final obj = IRGenerator(
+        DiagnosticCollector(),
+      ).generateContract(makeAdder());
       final yul = YulPrinter().print(obj);
       expect(yul, contains('mstore(0,'));
       expect(yul, contains('return(0, 32)'));
     });
 
     test('lowers to valid bytecode embedding the selector', () {
-      final obj = IRGenerator(DiagnosticCollector()).generateContract(makeAdder());
+      final obj = IRGenerator(
+        DiagnosticCollector(),
+      ).generateContract(makeAdder());
       final bytecode = YulCodeGenerator().generate(obj);
       expect(bytecode, isNotEmpty);
       // PUSH4 selector and per-argument CALLDATALOAD offsets appear in code.

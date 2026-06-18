@@ -208,8 +208,9 @@ class YulCodeGenerator {
         _frame.pop(); // condition consumed
         _asm.emit(Opcode.ISZERO);
         _asm.jumpi(endLabel);
-        _loopStack.add(_LoopContext(
-            breakLabel: endLabel, continueLabel: postLabel));
+        _loopStack.add(
+          _LoopContext(breakLabel: endLabel, continueLabel: postLabel),
+        );
         _generateBlock(body);
         _loopStack.removeLast();
         _asm.label(postLabel);
@@ -492,8 +493,8 @@ class YulCodeGenerator {
 
   static String _unquote(String s) =>
       (s.length >= 2 && s.startsWith('"') && s.endsWith('"'))
-          ? s.substring(1, s.length - 1)
-          : s;
+      ? s.substring(1, s.length - 1)
+      : s;
 
   // ── Builtin opcode tables ────────────────────────────────────────────────────
 
@@ -579,10 +580,23 @@ class YulCodeGenerator {
   /// Includes the terminating instructions (`return`, `stop`, …): they halt
   /// execution and leave nothing, so no result POP must follow them.
   static const _builtinVoidOpcodes = {
-    'stop', 'return', 'revert', 'invalid', 'selfdestruct',
-    'mstore', 'mstore8', 'sstore',
-    'calldatacopy', 'codecopy', 'returndatacopy', 'extcodecopy',
-    'log0', 'log1', 'log2', 'log3', 'log4',
+    'stop',
+    'return',
+    'revert',
+    'invalid',
+    'selfdestruct',
+    'mstore',
+    'mstore8',
+    'sstore',
+    'calldatacopy',
+    'codecopy',
+    'returndatacopy',
+    'extcodecopy',
+    'log0',
+    'log1',
+    'log2',
+    'log3',
+    'log4',
     'pop',
   };
 }

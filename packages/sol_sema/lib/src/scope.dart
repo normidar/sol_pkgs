@@ -2,11 +2,7 @@ import 'package:sol_types/sol_types.dart';
 
 /// A single symbol in a scope.
 class Symbol {
-  const Symbol({
-    required this.name,
-    required this.type,
-    required this.kind,
-  });
+  const Symbol({required this.name, required this.type, required this.kind});
 
   final String name;
   final SolType type;
@@ -37,8 +33,7 @@ class Scope {
     _symbols[symbol.name] = symbol;
   }
 
-  Symbol? lookup(String name) =>
-      _symbols[name] ?? parent?.lookup(name);
+  Symbol? lookup(String name) => _symbols[name] ?? parent?.lookup(name);
 
   bool isDeclaredLocally(String name) => _symbols.containsKey(name);
 }

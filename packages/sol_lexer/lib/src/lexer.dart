@@ -24,9 +24,9 @@ class Lexer {
     final tokens = <Token>[];
     while (true) {
       final tok = nextToken();
-      final skip = !includeTrivia &&
-          (tok.kind == TokenKind.Whitespace ||
-              tok.kind == TokenKind.Comment);
+      final skip =
+          !includeTrivia &&
+          (tok.kind == TokenKind.Whitespace || tok.kind == TokenKind.Comment);
       if (!skip) tokens.add(tok);
       if (tok.kind == TokenKind.Eof) break;
     }
@@ -109,7 +109,7 @@ class Lexer {
     }
 
     // ── Plain string literals ─────────────────────────────────────────────
-    if (ch == 0x22 /* " */ || ch == 0x27 /* ' */) {
+    if (ch == 0x22 /* " */ || ch == 0x27 /* ' */ ) {
       return _scanString(start, ch);
     }
 
@@ -128,16 +128,18 @@ class Lexer {
     // ── Decimal numbers ────────────────────────────────────────────────────
     if (_isDigit(ch)) {
       _scanDecimalDigits();
-      if (_pos < source.length && _cu(_pos) == 0x2E /* . */ &&
-          _pos + 1 < source.length && _isDigit(_cu(_pos + 1))) {
+      if (_pos < source.length &&
+          _cu(_pos) == 0x2E /* . */ &&
+          _pos + 1 < source.length &&
+          _isDigit(_cu(_pos + 1))) {
         _pos++;
         _scanDecimalDigits();
       }
       if (_pos < source.length &&
-          (_cu(_pos) == 0x65 /* e */ || _cu(_pos) == 0x45 /* E */)) {
+          (_cu(_pos) == 0x65 /* e */ || _cu(_pos) == 0x45 /* E */ )) {
         _pos++;
         if (_pos < source.length &&
-            (_cu(_pos) == 0x2B /* + */ || _cu(_pos) == 0x2D /* - */)) {
+            (_cu(_pos) == 0x2B /* + */ || _cu(_pos) == 0x2D /* - */ )) {
           _pos++;
         }
         _scanDecimalDigits();
@@ -165,16 +167,26 @@ class Lexer {
     // ── Punctuation & operators ────────────────────────────────────────────
     _pos++;
     switch (ch) {
-      case 0x28: return _tok(TokenKind.LParen, start, 1);
-      case 0x29: return _tok(TokenKind.RParen, start, 1);
-      case 0x5B: return _tok(TokenKind.LBracket, start, 1);
-      case 0x5D: return _tok(TokenKind.RBracket, start, 1);
-      case 0x7B: return _tok(TokenKind.LBrace, start, 1);
-      case 0x7D: return _tok(TokenKind.RBrace, start, 1);
-      case 0x3B: return _tok(TokenKind.Semicolon, start, 1);
-      case 0x2C: return _tok(TokenKind.Comma, start, 1);
-      case 0x7E: return _tok(TokenKind.Tilde, start, 1);
-      case 0x3F: return _tok(TokenKind.Question, start, 1);
+      case 0x28:
+        return _tok(TokenKind.LParen, start, 1);
+      case 0x29:
+        return _tok(TokenKind.RParen, start, 1);
+      case 0x5B:
+        return _tok(TokenKind.LBracket, start, 1);
+      case 0x5D:
+        return _tok(TokenKind.RBracket, start, 1);
+      case 0x7B:
+        return _tok(TokenKind.LBrace, start, 1);
+      case 0x7D:
+        return _tok(TokenKind.RBrace, start, 1);
+      case 0x3B:
+        return _tok(TokenKind.Semicolon, start, 1);
+      case 0x2C:
+        return _tok(TokenKind.Comma, start, 1);
+      case 0x7E:
+        return _tok(TokenKind.Tilde, start, 1);
+      case 0x3F:
+        return _tok(TokenKind.Question, start, 1);
 
       case 0x2B: // +
         if (_consume(0x2B)) return _tok(TokenKind.PlusPlus, start, 2);
@@ -261,12 +273,15 @@ class Lexer {
 
   // ── Internal helpers ──────────────────────────────────────────────────────
 
-  Token _scanString(int start, int quote,
-      {TokenKind kind = TokenKind.StringLiteral}) {
+  Token _scanString(
+    int start,
+    int quote, {
+    TokenKind kind = TokenKind.StringLiteral,
+  }) {
     _pos++; // consume opening quote
     while (_pos < source.length) {
       final c = _cu(_pos++);
-      if (c == 0x5C /* \ */) {
+      if (c == 0x5C /* \ */ ) {
         if (_pos < source.length) _pos++; // skip escape
       } else if (c == quote) {
         break;
@@ -306,29 +321,26 @@ class Lexer {
   }
 
   Token _tok(TokenKind kind, int start, int length) => Token(
-        kind: kind,
-        location: _loc(start, length),
-        lexeme: source.substring(start, start + length),
-      );
+    kind: kind,
+    location: _loc(start, length),
+    lexeme: source.substring(start, start + length),
+  );
 
   Token _tokLex(TokenKind kind, int start) => Token(
-        kind: kind,
-        location: _loc(start, _pos - start),
-        lexeme: source.substring(start, _pos),
-      );
+    kind: kind,
+    location: _loc(start, _pos - start),
+    lexeme: source.substring(start, _pos),
+  );
 
   SourceLocation _loc(int start, int length) =>
       SourceLocation(sourceIndex: sourceIndex, offset: start, length: length);
 
-  static bool _isWs(int c) =>
-      c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D;
+  static bool _isWs(int c) => c == 0x20 || c == 0x09 || c == 0x0A || c == 0x0D;
 
   static bool _isDigit(int c) => c >= 0x30 && c <= 0x39;
 
   static bool _isHexDigit(int c) =>
-      _isDigit(c) ||
-      (c >= 0x41 && c <= 0x46) ||
-      (c >= 0x61 && c <= 0x66);
+      _isDigit(c) || (c >= 0x41 && c <= 0x46) || (c >= 0x61 && c <= 0x66);
 
   static bool _isIdentStart(int c) =>
       (c >= 0x41 && c <= 0x5A) ||

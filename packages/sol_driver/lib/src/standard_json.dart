@@ -29,12 +29,14 @@ class StandardJson {
     Map<String, dynamic> outputSelection,
   ) {
     final errors = result.diagnostics
-        .map((d) => {
-              'type': d.severity == Severity.warning ? 'Warning' : 'Error',
-              'severity': d.severity.name,
-              'message': d.message,
-              'formattedMessage': d.toString(),
-            })
+        .map(
+          (d) => {
+            'type': d.severity == Severity.warning ? 'Warning' : 'Error',
+            'severity': d.severity.name,
+            'message': d.message,
+            'formattedMessage': d.toString(),
+          },
+        )
         .toList();
 
     final contracts = <String, dynamic>{};
@@ -43,18 +45,13 @@ class StandardJson {
         entry.value.name: {
           'abi': entry.value.abi,
           'evm': {
-            'bytecode': {
-              'object': entry.value.bytecodeHex,
-            },
+            'bytecode': {'object': entry.value.bytecodeHex},
           },
           'ir': entry.value.yulIr,
         },
       };
     }
 
-    return {
-      'errors': errors,
-      'contracts': contracts,
-    };
+    return {'errors': errors, 'contracts': contracts};
   }
 }

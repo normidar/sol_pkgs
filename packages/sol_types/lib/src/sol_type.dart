@@ -21,7 +21,7 @@ abstract class SolType {
 
 class IntType extends SolType {
   const IntType(this.bits, {this.signed = true})
-      : assert(bits >= 8 && bits <= 256 && bits % 8 == 0);
+    : assert(bits >= 8 && bits <= 256 && bits % 8 == 0);
 
   final int bits;
   final bool signed;
@@ -32,11 +32,11 @@ class IntType extends SolType {
   @override
   int get abiEncodedSize => 32; // always padded to 32 bytes in ABI
 
-  BigInt get min =>
-      signed ? -(BigInt.one << (bits - 1)) : BigInt.zero;
+  BigInt get min => signed ? -(BigInt.one << (bits - 1)) : BigInt.zero;
 
-  BigInt get max =>
-      signed ? (BigInt.one << (bits - 1)) - BigInt.one : (BigInt.one << bits) - BigInt.one;
+  BigInt get max => signed
+      ? (BigInt.one << (bits - 1)) - BigInt.one
+      : (BigInt.one << bits) - BigInt.one;
 }
 
 const uint8Type = IntType(8, signed: false);
@@ -124,8 +124,7 @@ class ArrayType extends SolType {
   bool get isFixed => length != null;
 
   @override
-  String get abiType =>
-      '${elementType.abiType}[${length ?? ''}]';
+  String get abiType => '${elementType.abiType}[${length ?? ''}]';
 
   @override
   int get abiEncodedSize => isFixed && !elementType.isDynamic
@@ -156,14 +155,12 @@ class TupleType extends SolType {
   final List<SolType> components;
 
   @override
-  String get abiType =>
-      '(${components.map((c) => c.abiType).join(',')})';
+  String get abiType => '(${components.map((c) => c.abiType).join(',')})';
 
   @override
-  int get abiEncodedSize =>
-      components.any((c) => c.isDynamic)
-          ? 0
-          : components.fold(0, (sum, c) => sum + c.abiEncodedSize);
+  int get abiEncodedSize => components.any((c) => c.isDynamic)
+      ? 0
+      : components.fold(0, (sum, c) => sum + c.abiEncodedSize);
 }
 
 // ── Function type ─────────────────────────────────────────────────────────────
@@ -200,7 +197,8 @@ class TypeType extends SolType {
   String get abiType => throw UnsupportedError('TypeType has no ABI encoding');
 
   @override
-  int get abiEncodedSize => throw UnsupportedError('TypeType has no ABI encoding');
+  int get abiEncodedSize =>
+      throw UnsupportedError('TypeType has no ABI encoding');
 }
 
 /// Represents an unresolved / error type to allow compilation to continue.

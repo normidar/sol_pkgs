@@ -6,8 +6,11 @@ class SourceLocation {
     required this.length,
   });
 
-  static const SourceLocation invalid =
-      SourceLocation(sourceIndex: -1, offset: -1, length: 0);
+  static const SourceLocation invalid = SourceLocation(
+    sourceIndex: -1,
+    offset: -1,
+    length: 0,
+  );
 
   /// Index into the compiler's source list (matches SourceUnit.index).
   final int sourceIndex;
@@ -66,7 +69,7 @@ class SourceMap {
   static List<int> _buildLineOffsets(String source) {
     final offsets = [0];
     for (var i = 0; i < source.length; i++) {
-      if (source.codeUnitAt(i) == 0x0A /* \n */) {
+      if (source.codeUnitAt(i) == 0x0A /* \n */ ) {
         offsets.add(i + 1);
       }
     }
