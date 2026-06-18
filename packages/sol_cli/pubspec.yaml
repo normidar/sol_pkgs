@@ -8,8 +8,7 @@ environment:
 
 dependencies:
   sol_support: any
-  sol_driver:
-    path: ../sol_driver
+  sol_driver: any
   args: ^2.5.0
 
 dev_dependencies:

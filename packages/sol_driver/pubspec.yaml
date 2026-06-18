@@ -9,18 +9,13 @@ environment:
 
 dependencies:
   sol_support: any
-  sol_lexer:
-    path: ../sol_lexer
+  sol_lexer: any
   sol_ast: any
-  sol_parser:
-    path: ../sol_parser
+  sol_parser: any
   sol_types: any
-  sol_sema:
-    path: ../sol_sema
-  sol_codegen:
-    path: ../sol_codegen
-  sol_evm:
-    path: ../sol_evm
+  sol_sema: any
+  sol_codegen: any
+  sol_evm: any
   sol_yul: any
   sol_abi: any
 
