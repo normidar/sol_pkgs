@@ -393,5 +393,39 @@ void main() {
       expect(diags.diagnostics, isEmpty);
       expect(varDecl.declarations.first?.annotation, isA<IntType>());
     });
+
+    test('resolver assigns the declared (signed) type to a parameter', () {
+      final diags = _newDiags();
+      final id = _id('x');
+      final fn = _fn('f',
+          params: [_param('x', 'int128')],
+          body: _block([ExpressionStatement(_loc(), id)]));
+      final file = _sourceFile([_contract('C', [fn])]);
+      Resolver(diags).resolve(file);
+      TypeChecker(diags).check(file);
+      final t = id.annotation;
+      expect(t, isA<IntType>());
+      expect((t as IntType).bits, 128);
+      expect(t.signed, isTrue);
+    });
+
+    test('int256 minus a number literal is allowed and stays signed', () {
+      // Regression: number literals adapt to the other operand's integer type,
+      // so `x - 1` with `int256 x` must not raise a type-mismatch error.
+      final diags = _newDiags();
+      final expr = BinaryOperation(_loc(), '-', _id('x'), _lit('1'));
+      final fn = _fn('f',
+          params: [_param('x', 'int256')],
+          returns: [_param('', 'int256')],
+          body: _block([ReturnStatement(_loc(), expr)]));
+      final file = _sourceFile([_contract('C', [fn])]);
+      Resolver(diags).resolve(file);
+      TypeChecker(diags).check(file);
+      expect(diags.diagnostics.where((d) => d.isError), isEmpty,
+          reason: 'literal should adapt to int256');
+      final t = expr.annotation;
+      expect(t, isA<IntType>());
+      expect((t as IntType).signed, isTrue);
+    });
   });
 }

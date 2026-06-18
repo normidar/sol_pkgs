@@ -2,6 +2,7 @@ import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_support/sol_support.dart';
 import 'package:sol_types/sol_types.dart';
 import 'scope.dart';
+import 'type_resolution.dart';
 
 /// First pass: builds the global symbol table and resolves name references.
 ///
@@ -41,7 +42,7 @@ class Resolver extends AstVisitor {
         case StateVariableDeclaration sv:
           _scope.declare(Symbol(
             name: sv.name,
-            type: const ErrorType(),
+            type: solTypeFromTypeName(sv.typeName),
             kind: SymbolKind.stateVariable,
           ));
         case EventDefinition ev:
@@ -101,7 +102,7 @@ class Resolver extends AstVisitor {
       if (p.name != null && p.name!.isNotEmpty) {
         _scope.declare(Symbol(
           name: p.name!,
-          type: const ErrorType(),
+          type: solTypeFromTypeName(p.typeName),
           kind: SymbolKind.parameter,
         ));
       }
@@ -110,7 +111,7 @@ class Resolver extends AstVisitor {
       if (p.name != null && p.name!.isNotEmpty) {
         _scope.declare(Symbol(
           name: p.name!,
-          type: const ErrorType(),
+          type: solTypeFromTypeName(p.typeName),
           kind: SymbolKind.localVariable,
         ));
       }
@@ -129,7 +130,7 @@ class Resolver extends AstVisitor {
       if (p.name != null && p.name!.isNotEmpty) {
         _scope.declare(Symbol(
           name: p.name!,
-          type: const ErrorType(),
+          type: solTypeFromTypeName(p.typeName),
           kind: SymbolKind.parameter,
         ));
       }
@@ -211,7 +212,7 @@ class Resolver extends AstVisitor {
       if (p.name != null && p.name!.isNotEmpty) {
         _scope.declare(Symbol(
           name: p.name!,
-          type: const ErrorType(),
+          type: solTypeFromTypeName(p.typeName),
           kind: SymbolKind.parameter,
         ));
       }
@@ -232,7 +233,7 @@ class Resolver extends AstVisitor {
       if (decl == null) continue;
       _scope.declare(Symbol(
         name: decl.name,
-        type: const ErrorType(),
+        type: solTypeFromTypeName(decl.typeName),
         kind: SymbolKind.localVariable,
       ));
     }

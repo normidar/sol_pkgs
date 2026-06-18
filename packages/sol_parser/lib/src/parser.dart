@@ -20,6 +20,9 @@ class Parser {
 
   int _pos = 0;
 
+  /// When > 0, [_error] suppresses diagnostics (used during [_speculate]).
+  int _suppressErrors = 0;
+
   Token get _cur => _pos < tokens.length ? tokens[_pos] : _eofToken;
   Token get _eofToken => Token(
         kind: TokenKind.Eof,
@@ -679,17 +682,18 @@ class Parser {
     // Tuple destructuring: `(T x, T y) = expr;` or `(x, y) = expr;`
     if (_at(TokenKind.LParen)) {
       // Could be a tuple expression or a tuple-destructuring var-decl.
-      // Try both; fall back to expression if no type names inside.
-      final saved = _pos;
-      try {
-        return _parseTupleVarDecl(start);
-      } on _ParseError {
-        _pos = saved;
-      }
+      // Try the declaration; fall back to expression if it doesn't fit.
+      final decl = _speculate(() => _parseTupleVarDecl(start));
+      if (decl != null) return decl;
     }
 
     if (_looksLikeTypeName()) {
-      return _parseVarDecl(start);
+      // `Ident[…]`, `Ident.Ident`, etc. are ambiguous: a user-defined-type
+      // variable declaration (`Foo[] xs;`) looks identical to an index/member
+      // assignment (`xs[i] = v;`). Try the declaration speculatively, and on
+      // failure parse it as an expression statement instead.
+      final decl = _speculate(() => _parseVarDecl(start));
+      if (decl != null) return decl;
     }
 
     final expr = _parseExpression();
@@ -1152,7 +1156,25 @@ class Parser {
   SourceLocation _locFrom(SourceLocation start) =>
       start.combine(_cur.location);
 
+  /// Attempts [parse] speculatively: on a parse error, rewinds the token
+  /// stream and returns null without recording any diagnostics. Used to
+  /// disambiguate constructs that share a prefix (e.g. `Foo[] xs;` vs
+  /// `xs[i] = v;`).
+  R? _speculate<R>(R Function() parse) {
+    final saved = _pos;
+    _suppressErrors++;
+    try {
+      return parse();
+    } on _ParseError {
+      _pos = saved;
+      return null;
+    } finally {
+      _suppressErrors--;
+    }
+  }
+
   void _error(String msg) {
+    if (_suppressErrors > 0) return;
     diagnostics.error(msg, location: _cur.location);
   }
 

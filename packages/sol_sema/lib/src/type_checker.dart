@@ -2,6 +2,7 @@ import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_support/sol_support.dart';
 import 'package:sol_types/sol_types.dart';
 import 'scope.dart' as sema;
+import 'type_resolution.dart';
 
 /// Second pass: annotates every expression node with its [SolType].
 ///
@@ -119,8 +120,7 @@ class TypeChecker extends AstVisitor {
     // Type-annotate each declared variable based on its type name.
     for (final decl in node.declarations) {
       if (decl == null) continue;
-      final t = _typeFromTypeName(decl.typeName);
-      decl.annotation = t;
+      decl.annotation = solTypeFromTypeName(decl.typeName);
     }
   }
 
@@ -168,7 +168,22 @@ class TypeChecker extends AstVisitor {
       return;
     }
 
-    final common = commonType(l, r);
+    // Shifts: the result has the (left) value operand's type; the shift amount
+    // may be any unsigned integer, so no common type is required.
+    if (node.operator$ == '<<' ||
+        node.operator$ == '>>' ||
+        node.operator$ == '>>>') {
+      _setType(node, l);
+      return;
+    }
+
+    // A number literal adapts to the other operand's integer type — `x - 1`
+    // with `int256 x` is valid even though the literal is nominally uint256.
+    final common = _isNumberLiteral(node.left) && r is IntType
+        ? r
+        : _isNumberLiteral(node.right) && l is IntType
+            ? l
+            : commonType(l, r);
     if (common == null) {
       _diagnostics.error(
         'Operator "${node.operator$}" not compatible with types '
@@ -180,6 +195,9 @@ class TypeChecker extends AstVisitor {
       _setType(node, common);
     }
   }
+
+  static bool _isNumberLiteral(Expression e) =>
+      e is Literal && e.kind == LiteralKind.number;
 
   @override
   void visitUnaryOperation(UnaryOperation node) {
@@ -209,15 +227,47 @@ class TypeChecker extends AstVisitor {
   @override
   void visitMemberAccess(MemberAccess node) {
     node.expression.accept(this);
-    // Member type resolution requires full type information; use errorType for now.
-    _setType(node, errorType);
+    // Built-in global members (msg.sender, block.timestamp, …) carry useful
+    // value types; everything else needs full member resolution (not yet done).
+    _setType(node, _globalMemberType(node) ?? errorType);
+  }
+
+  /// Types of the common `msg`/`block`/`tx` members, or null if unknown.
+  static SolType? _globalMemberType(MemberAccess node) {
+    final base = node.expression;
+    if (base is! Identifier) return null;
+    switch ('${base.name}.${node.memberName}') {
+      case 'msg.sender':
+      case 'tx.origin':
+      case 'block.coinbase':
+        return addressType;
+      case 'msg.value':
+      case 'block.timestamp':
+      case 'block.number':
+      case 'block.gaslimit':
+      case 'block.chainid':
+      case 'block.basefee':
+      case 'block.difficulty':
+      case 'block.prevrandao':
+      case 'tx.gasprice':
+        return uint256Type;
+      default:
+        return null;
+    }
   }
 
   @override
   void visitIndexAccess(IndexAccess node) {
     node.base.accept(this);
     node.index?.accept(this);
-    _setType(node, errorType);
+    final baseT = _typeOf(node.base);
+    if (baseT is MappingType) {
+      _setType(node, baseT.valueType);
+    } else if (baseT is ArrayType) {
+      _setType(node, baseT.elementType);
+    } else {
+      _setType(node, errorType);
+    }
   }
 
   @override
@@ -241,7 +291,19 @@ class TypeChecker extends AstVisitor {
   @override
   void visitTupleExpression(TupleExpression node) {
     for (final c in node.components) c?.accept(this);
-    _setType(node, errorType);
+    if (node.components.length == 1 && node.components.first != null) {
+      // Parenthesised expression `(e)` — propagate the inner type.
+      _setType(node, _typeOf(node.components.first!));
+    } else {
+      _setType(node, errorType);
+    }
+  }
+
+  @override
+  void visitTypeConversion(TypeConversion node) {
+    node.expression.accept(this);
+    // An explicit cast `T(x)` has the static type of the target type `T`.
+    _setType(node, solTypeFromTypeName(node.typeName));
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -249,35 +311,4 @@ class TypeChecker extends AstVisitor {
   static bool _isComparisonOp(String op) =>
       op == '<' || op == '<=' || op == '>' || op == '>=' ||
       op == '==' || op == '!=';
-
-  /// Approximate type from a type name node. Returns [errorType] if unknown.
-  SolType _typeFromTypeName(TypeName? typeName) {
-    if (typeName == null) return errorType;
-    switch (typeName) {
-      case ElementaryTypeName(:final name):
-        return _elementaryType(name);
-      default:
-        return errorType;
-    }
-  }
-
-  static SolType _elementaryType(String name) {
-    if (name == 'bool') return boolType;
-    if (name == 'address' || name == 'address payable') return addressType;
-    if (name == 'string') return stringType;
-    if (name == 'bytes') return bytesType;
-    if (name.startsWith('uint')) {
-      final bits = name.length > 4 ? int.tryParse(name.substring(4)) : 256;
-      return IntType(bits ?? 256, signed: false);
-    }
-    if (name.startsWith('int')) {
-      final bits = name.length > 3 ? int.tryParse(name.substring(3)) : 256;
-      return IntType(bits ?? 256);
-    }
-    if (name.startsWith('bytes') && name.length > 5) {
-      final size = int.tryParse(name.substring(5));
-      if (size != null) return BytesNType(size);
-    }
-    return errorType;
-  }
 }
