@@ -93,6 +93,7 @@
 | NatSpec (`///` / `/** */`) トークン保持 | ✅ |
 | エラーリカバリ (パニックモード + `_synchronize`) | ✅ |
 | 型名ヒューリスティック (`_looksLikeTypeName`) | ✅ |
+| **宣言 vs 式の曖昧性解消 (`_speculate`: 投機的パース + 診断抑制でバックトラック)** | ✅ |
 | テスト (7件通過) | ✅ |
 
 ---
@@ -133,6 +134,8 @@
 | **シンボルに実型を割当 (パラメータ/戻り値/ローカル/状態変数を宣言型名から解決)** | ✅ |
 | **数値リテラルの型適応 (`int256 x` に対し `x - 1` を許可)・シフトは左辺型** | ✅ |
 | **明示的型変換 `T(x)` の結果型注釈 (`visitTypeConversion`)** | ✅ |
+| **mapping/配列のインデックスアクセス型 (`m[k]`→値型, `a[i]`→要素型)** | ✅ |
+| **グローバルメンバの型 (`msg.sender`→address, `block.timestamp`→uint256 等)** | ✅ |
 | **共有ユーティリティ `solTypeFromTypeName` / `elementarySolType`** | ✅ |
 | テスト (30件通過) | ✅ |
 | FunctionCall の型解決 | ❌ |
@@ -206,11 +209,18 @@
 | **`require(c)` / `require(c, "msg")` (`Error(string)` エンコード) / `assert(c)` (`Panic(0x01)`)** | ✅ |
 | **`revert()` / `revert("msg")`** | ✅ |
 | **明示的型変換 (`uintN(x)`/`intN(x)`/`address(x)`): マスク / `signextend`** | ✅ |
-| 値型契約を最小EVMで実行検証 (overflow revert / unchecked wrap / 符号付き / require / cast) | ✅ |
-| テスト (7件 codegen + 23件 driver 実行検証) | ✅ |
-| `emit` (イベント/ログ) / コンストラクタ本体 | ❌ |
-| `revert CustomError(args)` のセレクタ付きデータ (今は bare revert) | ❌ |
-| 動的型 (string/bytes/動的配列/mapping) の ABI・ストレージ対応 | ❌ |
+| **mapping ストレージ (`m[k]` = `keccak256(k . slot)`, ネスト対応) の読み書き** | ✅ |
+| **グローバルメンバ (`msg.sender`→caller, `msg.value`, `block.timestamp` 等)** | ✅ |
+| **`emit Event(...)` → `log{n}` (topic0 = keccak署名, indexed→topic, それ以外→data)** | ✅ |
+| **`revert CustomError(args)` → セレクタ + ABI 引数エンコード** | ✅ |
+| **コンストラクタ本体の実行 (デプロイコードで state 初期化, 引数なし)** | ✅ |
+| **`public` 状態変数の getter 自動生成 (スカラ / mapping / 配列)** | ✅ |
+| 値型契約を最小EVMで実行検証 (ERC20風: constructor/transfer/event/error/getter) | ✅ |
+| テスト (7件 codegen + 30件 driver 実行検証) | ✅ |
+| 動的配列の length / `push` / `pop` / 境界チェック (要素アクセスは slot 計算のみ) | ❌ |
+| string/bytes (動的型) の ABI エンコード/デコード・ストレージ | ❌ |
+| 固定長配列の複数スロット割当 (現状 1 スロット/変数) / struct | ❌ |
+| コンストラクタ引数 (creation calldata からの ABI デコード) | ❌ |
 | `&&`・`||` の短絡評価 (値は正しいが副作用は常に評価) | ❌ |
 | `**` の桁あふれチェック | ❌ |
 
@@ -304,6 +314,23 @@
 | B-24 | `sol_codegen/ir_generator.dart` | `revert(...)` 文 (`RevertStatement`) がコード生成で握り潰され消失 → revert を生成 | 2026-06-18 |
 | B-25 | `sol_codegen/ir_generator.dart` | 明示的型変換 `T(x)` (`TypeConversion`) が `0` を生成 → マスク/`signextend` で正しく変換 | 2026-06-18 |
 | B-26 | `sol_sema/{resolver,type_checker}.dart` | 全シンボルが `ErrorType` で型情報が下流に流れず → 宣言型名から実型を割当。併せて数値リテラルの型適応 (`int256 - 1` の偽陽性エラー) とシフト左辺型を修正 | 2026-06-18 |
+| B-27 | `sol_parser/parser.dart` | `arr[i] = v;` 等が型名 (`Foo[] x;`) と誤認され「Expected identifier」で失敗 → `_speculate` で投機的に宣言を試し、失敗時は診断を捨てて式文へバックトラック | 2026-06-18 |
+
+## 実装した未実装機能（B-28〜B-33: 実コントラクト対応）
+
+| # | 場所 | 内容 | 実装日 |
+|---|---|---|---|
+| B-28 | `sol_codegen` + `sol_sema` | **mapping ストレージ**: `m[k]` を `keccak256(k . slot)` で読み書き、ネスト mapping も合成。型システムが mapping/配列の要素型を解決 | 2026-06-18 |
+| B-29 | `sol_codegen` + `sol_yul` | **グローバルメンバ**: `msg.sender`→`caller()`, `msg.value`→`callvalue()`, `block.*`/`tx.*` を対応オペコードへ | 2026-06-18 |
+| B-30 | `sol_codegen/ir_generator.dart` | **`emit Event(...)`**: topic0 = keccak署名 (compile-time), indexed→topic, それ以外→ABIエンコードして `log{n}` | 2026-06-18 |
+| B-31 | `sol_codegen/ir_generator.dart` | **`revert CustomError(args)`**: 4バイトセレクタ + ABI 引数をメモリに置いて revert | 2026-06-18 |
+| B-32 | `sol_codegen/ir_generator.dart` | **コンストラクタ本体**: デプロイコードで実行し state を初期化 (引数なし)。helper をオブジェクト別にスコープ | 2026-06-18 |
+| B-33 | `sol_codegen/ir_generator.dart` | **`public` 状態変数の getter 自動生成**: スカラ/mapping/配列。署名からセレクタを算出 | 2026-06-18 |
+
+> B-28〜B-33 により、**コンストラクタ・残高 mapping・`Transfer` イベント・カスタムエラー・
+> getter を持つ ERC20 風トークン**が、実行可能な creation/runtime バイトコードまで通る。
+> `sol_driver/test/evm_exec_test.dart` に creation コードを実行して constructor の storage 反映・
+> transfer・ログ topic・revert を検証するテストを追加 (driver 計 30 件)。
 
 > B-20〜B-25 はいずれも「コンパイルは通るが実行時に誤った/壊れたバイトコード」を生む
 > 静かな正確性バグ。`sol_driver/test/evm_exec_test.dart` に overflow revert / unchecked wrap /
@@ -329,8 +356,8 @@
 | sol_codegen | 7 | ✅ 全通過 |
 | sol_evm | 7 | ✅ 全通過 |
 | sol_yul | 17 | ✅ 全通過 |
-| sol_driver | 23 | ✅ 全通過 (うち19件は最小EVMでの実行検証) |
-| **合計** | **138** | **✅ 全通過** |
+| sol_driver | 30 | ✅ 全通過 (うち26件は最小EVMでの実行検証) |
+| **合計** | **145** | **✅ 全通過** |
 
 ---
 
@@ -371,9 +398,10 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 ## 第2マイルストーン以降（優先度順）
 
 第2マイルストーン（ループ・状態変数・代入・演算子）に加え、**Solidity ≥0.8 の
-チェック付き算術・符号付き演算・`require`/`assert`/`revert`・明示的型変換・`unchecked`**
-を実装し、値型コントラクトが**正しいセマンティクスの実行可能バイトコード**になることを
-最小EVMでの実行テスト (19件) で確認済み。
+チェック付き算術・符号付き演算・`require`/`assert`/`revert`・明示的型変換・`unchecked`**、
+さらに **mapping ストレージ・イベント・カスタムエラー・コンストラクタ・public getter**
+を実装し、**ERC20 風トークン**が実行可能な creation/runtime バイトコードになることを
+最小EVMでの実行テスト (26件) で確認済み。
 
 | 優先度 | タスク | 状態 |
 |---|---|---|
@@ -383,11 +411,13 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 | 高 | `sol_codegen`: 符号付き比較・除算・シフト (slt/sgt/sdiv/sar) | ✅ |
 | 高 | `sol_codegen`: `require`/`assert`/`revert` + 明示的型変換 | ✅ |
 | 高 | `sol_sema`: シンボルへの実型割当 (符号情報を codegen へ伝播) | ✅ |
-| 高 | `sol_sema`: FunctionCall / MemberAccess の型解決 | ❌ |
-| 中 | `sol_codegen`: emit (イベント/ログ) / コンストラクタ本体 | ❌ |
-| 中 | `sol_codegen`: mapping / 配列 / struct のストレージレイアウト | ❌ |
+| 高 | `sol_codegen`: mapping ストレージ (keccak slot) + グローバルメンバ | ✅ |
+| 高 | `sol_codegen`: emit (イベント/ログ) / コンストラクタ本体 / public getter | ✅ |
+| 高 | `sol_codegen`: `revert CustomError(args)` のセレクタ付きデータ | ✅ |
+| 高 | `sol_sema`: FunctionCall / MemberAccess の完全な型解決 | ❌ |
+| 中 | `sol_codegen`: 動的配列の length/push/pop / string・bytes / struct | ❌ |
+| 中 | `sol_codegen`: コンストラクタ引数 (creation calldata デコード) | ❌ |
 | 中 | `sol_codegen`: `&&`・`||` の短絡評価 / `**` の桁あふれチェック | ❌ |
-| 中 | `sol_codegen`: `revert CustomError(args)` のセレクタ付きデータ | ❌ |
 | 中 | `sol_abi`: tuple エンコード / ABI デコード | ❌ |
 | 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) | ❌ |
 | 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) | ❌ |

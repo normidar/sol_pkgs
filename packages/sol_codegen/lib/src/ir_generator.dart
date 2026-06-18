@@ -36,11 +36,25 @@ class IRGenerator {
   /// lowering, keyed by name and emitted once into the runtime object.
   final Map<String, YulFunctionDefinition> _helpers = {};
 
+  /// Events and custom errors declared in the contract being lowered, by name.
+  final Map<String, EventDefinition> _events = {};
+  final Map<String, CustomErrorDefinition> _errors = {};
+
   YulObject generateContract(ContractDefinition contract) {
+    _events
+      ..clear()
+      ..addEntries(contract.members
+          .whereType<EventDefinition>()
+          .map((e) => MapEntry(e.name, e)));
+    _errors
+      ..clear()
+      ..addEntries(contract.members
+          .whereType<CustomErrorDefinition>()
+          .map((e) => MapEntry(e.name, e)));
     _allocateStateVariables(contract);
 
     final runtimeBlock = _generateRuntimeCode(contract);
-    final deployBlock = _generateDeploymentCode(contract.name);
+    final deployBlock = _generateDeploymentCode(contract);
 
     final runtimeObj = YulObject(
       '${contract.name}_deployed',
@@ -74,18 +88,56 @@ class IRGenerator {
 
   // ── Deployment code ───────────────────────────────────────────────────────
 
-  YulBlock _generateDeploymentCode(String contractName) {
-    // Simplified: copy runtime object to memory and return it.
-    // Real codegen runs the constructor and then returns the runtime code.
+  YulBlock _generateDeploymentCode(ContractDefinition contract) {
+    // Helpers discovered while lowering the constructor must live in *this*
+    // (creation) object, separate from the runtime object's helpers.
+    _helpers.clear();
+    final contractName = contract.name;
+
+    // Run the constructor body (if any) before returning the runtime code.
+    final ctorStmts = <YulStatement>[];
+    FunctionDefinition? ctor;
+    for (final m in contract.members) {
+      if (m is FunctionDefinition && m.kind == FunctionKind.constructor) {
+        ctor = m;
+        break;
+      }
+    }
+    if (ctor != null && ctor.body != null) {
+      if (ctor.parameters.isNotEmpty) {
+        // Decoding ABI-encoded constructor args appended to the creation code
+        // is not yet modelled; run the body with params unbound is unsafe, so
+        // skip it and report rather than emit broken code.
+        _diagnostics.warning(
+          'Constructor parameters are not yet supported; constructor body skipped',
+          location: ctor.location,
+        );
+      } else {
+        final savedLocals = Set<String>.from(_localNames);
+        final savedReturns = List<String>.from(_returnSlots);
+        _localNames.clear();
+        _returnSlots.clear();
+        ctorStmts.add(_generateBlock(ctor.body!));
+        _localNames
+          ..clear()
+          ..addAll(savedLocals);
+        _returnSlots
+          ..clear()
+          ..addAll(savedReturns);
+      }
+    }
+
+    final deployed = '"${contractName}_deployed"';
     return YulBlock([
+      ...ctorStmts,
       YulExpressionStatement(
         YulFunctionCall('codecopy', [
           YulLiteral('0', YulLiteralKind.number),
           YulFunctionCall('dataoffset', [
-            YulLiteral('"${contractName}_deployed"', YulLiteralKind.string),
+            YulLiteral(deployed, YulLiteralKind.string),
           ]),
           YulFunctionCall('datasize', [
-            YulLiteral('"${contractName}_deployed"', YulLiteralKind.string),
+            YulLiteral(deployed, YulLiteralKind.string),
           ]),
         ]),
       ),
@@ -93,21 +145,26 @@ class IRGenerator {
         YulFunctionCall('return', [
           YulLiteral('0', YulLiteralKind.number),
           YulFunctionCall('datasize', [
-            YulLiteral('"${contractName}_deployed"', YulLiteralKind.string),
+            YulLiteral(deployed, YulLiteralKind.string),
           ]),
         ]),
       ),
+      ..._helpers.values,
     ]);
   }
 
   // ── Runtime code ──────────────────────────────────────────────────────────
 
   YulBlock _generateRuntimeCode(ContractDefinition contract) {
+    _helpers.clear();
     // Lower the function bodies first: this discovers which runtime helpers
     // (overflow panics, checked-arithmetic routines) are needed.
     final functions = <YulStatement>[
       for (final member in contract.members)
-        if (member is FunctionDefinition && member.body != null)
+        if (member is FunctionDefinition &&
+            member.body != null &&
+            member.kind == FunctionKind.function &&
+            member.name != null)
           _generateFunction(member),
     ];
 
@@ -179,6 +236,16 @@ class IRGenerator {
       );
     }).toList();
 
+    // Auto-generated getters for `public` state variables.
+    for (final member in contract.members) {
+      if (member is StateVariableDeclaration &&
+          member.visibility == Visibility.public &&
+          member.mutability == VariableMutability.mutable) {
+        final getter = _generateGetterCase(member);
+        if (getter != null) cases.add(getter);
+      }
+    }
+
     return YulSwitch(
       YulFunctionCall('shr', [
         YulLiteral('224', YulLiteralKind.number),
@@ -190,6 +257,50 @@ class IRGenerator {
       null,
     );
   }
+
+  /// Builds the dispatcher case for the auto-generated getter of a `public`
+  /// state variable: scalars become `name()`, mappings/arrays take their key/
+  /// index arguments (e.g. `balances(address)`), returning the value slot.
+  /// Returns null when the value type isn't a returnable value type.
+  YulCase? _generateGetterCase(StateVariableDeclaration sv) {
+    final baseSlot = _stateVarSlots[sv.name];
+    if (baseSlot == null) return null;
+
+    final keyTypes = <String>[];
+    YulExpression slotExpr = YulLiteral('$baseSlot', YulLiteralKind.number);
+    var typeName = sv.typeName;
+    var argIndex = 0;
+    while (true) {
+      if (typeName is MappingTypeName) {
+        keyTypes.add(abiCanonicalType(typeName.keyType));
+        slotExpr = YulFunctionCall(
+            _mappingSlotHelper(), [_calldataArg(argIndex++), slotExpr]);
+        typeName = typeName.valueType;
+      } else if (typeName is ArrayTypeName) {
+        keyTypes.add('uint256');
+        slotExpr = typeName.length == null
+            ? YulFunctionCall(_dynArraySlotHelper(), [slotExpr, _calldataArg(argIndex++)])
+            : YulFunctionCall('add', [slotExpr, _calldataArg(argIndex++)]);
+        typeName = typeName.baseType;
+      } else {
+        break;
+      }
+    }
+    // Only value types are returned in a single word; structs/tuples are not.
+    if (typeName is! ElementaryTypeName) return null;
+
+    final signature = '${sv.name}(${keyTypes.join(',')})';
+    return YulCase(
+      YulLiteral(selectorHex(signature), YulLiteralKind.number),
+      YulBlock([
+        _callStmt('mstore', [_n('0'), YulFunctionCall('sload', [slotExpr])]),
+        _abiReturn(32),
+      ]),
+    );
+  }
+
+  YulExpression _calldataArg(int index) => YulFunctionCall(
+      'calldataload', [YulLiteral('${4 + index * 32}', YulLiteralKind.number)]);
 
   YulFunctionDefinition _generateFunction(FunctionDefinition fn) {
     // Parameters are referenced from the body as plain identifiers, so their
@@ -357,6 +468,9 @@ class IRGenerator {
       case RevertStatement(:final expression):
         return _generateRevert(expression);
 
+      case EmitStatement(:final call):
+        return _generateEmit(call);
+
       default:
         _diagnostics.warning(
           'Unhandled statement ${stmt.runtimeType} in IR generator',
@@ -444,8 +558,8 @@ class IRGenerator {
     return YulBlock([]);
   }
 
-  /// Lowers a `revert …;` statement. Handles `revert()`, `revert("msg")`, and
-  /// (best-effort) `revert CustomError(...)` → a plain revert with no data.
+  /// Lowers a `revert …;` statement: `revert()`, `revert("msg")`
+  /// (`Error(string)`), or `revert CustomError(args)` (selector + ABI args).
   YulStatement _generateRevert(Expression? expression) {
     if (expression is FunctionCall) {
       final callee = expression.expression;
@@ -457,16 +571,76 @@ class IRGenerator {
         }
         return YulBlock([_revertCall(0, 0)]);
       }
-      // `revert CustomError(args)` — selector-encoded data is not modelled yet;
-      // emit a bare revert so control-flow semantics are still correct.
+      if (callee is Identifier && _errors.containsKey(callee.name)) {
+        return YulBlock(_revertWithError(
+            _errors[callee.name]!, expression.arguments));
+      }
     }
     return YulBlock([_revertCall(0, 0)]);
   }
 
-  /// Reads an assignable expression (identifier — local or storage).
+  /// `revert CustomError(args)` → store the 4-byte selector + ABI-encoded
+  /// (static value-type) args in memory and revert with them.
+  List<YulStatement> _revertWithError(
+      CustomErrorDefinition error, List<Expression> args) {
+    final selector = int.parse(selectorHex(errorSignature(error)).substring(2), radix: 16);
+    final stmts = <YulStatement>[
+      _callStmt('mstore', [_n('0'), _n(_selectorWord(selector))]),
+      for (var i = 0; i < args.length; i++)
+        _callStmt('mstore', [_n('${4 + i * 32}'), _generateExpression(args[i])]),
+    ];
+    stmts.add(_revertCall(0, 4 + args.length * 32));
+    return stmts;
+  }
+
+  /// Lowers `emit Event(args)` to a `log{n}` with the (compile-time) topic-0
+  /// hash, indexed args as topics, and non-indexed args as ABI-encoded data.
+  YulStatement _generateEmit(Expression call) {
+    if (call is! FunctionCall || call.expression is! Identifier) {
+      _diagnostics.warning('Unsupported emit target', location: call.location);
+      return YulBlock([]);
+    }
+    final name = (call.expression as Identifier).name;
+    final event = _events[name];
+    if (event == null) {
+      _diagnostics.warning('Unknown event "$name"', location: call.location);
+      return YulBlock([]);
+    }
+
+    final topics = <YulExpression>[];
+    if (!event.anonymous) {
+      topics.add(_n(eventTopicHex(event)));
+    }
+    final dataArgs = <YulExpression>[];
+    for (var i = 0; i < call.arguments.length && i < event.parameters.length; i++) {
+      final value = _generateExpression(call.arguments[i]);
+      if (event.parameters[i].indexed) {
+        topics.add(value);
+      } else {
+        dataArgs.add(value);
+      }
+    }
+
+    final stmts = <YulStatement>[
+      for (var i = 0; i < dataArgs.length; i++)
+        _callStmt('mstore', [_n('${i * 32}'), dataArgs[i]]),
+    ];
+    stmts.add(_callStmt('log${topics.length}', [
+      _n('0'),
+      _n('${dataArgs.length * 32}'),
+      ...topics,
+    ]));
+    return YulBlock(stmts);
+  }
+
+  /// Reads an assignable expression (identifier or storage index — local,
+  /// state variable, or `mapping[key]` / `array[i]`).
   YulExpression _readLValue(Expression target) {
     if (target is Identifier && _isStateVar(target.name)) {
       return YulFunctionCall('sload', [_slot(target.name)]);
+    }
+    if (target is IndexAccess && _isStorageIndex(target)) {
+      return YulFunctionCall('sload', [_storageSlotOf(target)]);
     }
     return _generateExpression(target);
   }
@@ -481,8 +655,13 @@ class IRGenerator {
       }
       return YulAssignment(['var_${target.name}'], value);
     }
-    // Index/member assignment (mappings, arrays, structs) needs storage-layout
-    // computation and is not yet supported.
+    if (target is IndexAccess && _isStorageIndex(target)) {
+      return YulExpressionStatement(
+        YulFunctionCall('sstore', [_storageSlotOf(target), value]),
+      );
+    }
+    // Member assignment (struct fields) needs storage-layout computation and
+    // is not yet supported.
     _diagnostics.warning(
       'Unhandled assignment target ${target.runtimeType} in IR generator',
       location: target.location,
@@ -528,6 +707,25 @@ class IRGenerator {
 
       case TypeConversion(:final typeName, :final expression):
         return _typeConversion(typeName, expression);
+
+      case MemberAccess(:final expression, :final memberName):
+        final global = _globalMember(expression, memberName);
+        if (global != null) return global;
+        _diagnostics.warning(
+          'Unsupported member access ".$memberName" in IR generator',
+          location: expr.location,
+        );
+        return YulLiteral('0', YulLiteralKind.number);
+
+      case IndexAccess():
+        if (_isStorageIndex(expr)) {
+          return YulFunctionCall('sload', [_storageSlotOf(expr)]);
+        }
+        _diagnostics.warning(
+          'Unsupported (non-storage) index access in IR generator',
+          location: expr.location,
+        );
+        return YulLiteral('0', YulLiteralKind.number);
 
       case FunctionCall(:final expression, :final arguments):
         if (expression is Identifier) {
@@ -715,6 +913,94 @@ class IRGenerator {
     final t = e.annotation;
     return t is IntType ? t : null;
   }
+
+  // ── Global members (msg.sender, block.timestamp, …) ────────────────────────
+
+  /// Lowers `base.member` for built-in globals, or null if not a known global.
+  YulExpression? _globalMember(Expression base, String member) {
+    if (base is! Identifier) return null;
+    final builtin = _globalMembers['${base.name}.$member'];
+    return builtin == null ? null : YulFunctionCall(builtin, const []);
+  }
+
+  static const _globalMembers = {
+    'msg.sender': 'caller',
+    'msg.value': 'callvalue',
+    'tx.origin': 'origin',
+    'tx.gasprice': 'gasprice',
+    'block.number': 'number',
+    'block.timestamp': 'timestamp',
+    'block.coinbase': 'coinbase',
+    'block.gaslimit': 'gaslimit',
+    'block.chainid': 'chainid',
+    'block.basefee': 'basefee',
+    'block.difficulty': 'prevrandao',
+    'block.prevrandao': 'prevrandao',
+  };
+
+  // ── Storage slot computation (state vars, mappings, arrays) ─────────────────
+
+  /// Whether [e] ultimately refers to contract storage (a state variable or an
+  /// index into one), so reads/writes lower to `sload`/`sstore`.
+  bool _isStorageIndex(Expression e) {
+    if (e is Identifier) return _isStateVar(e.name);
+    if (e is IndexAccess) return _isStorageIndex(e.base);
+    return false;
+  }
+
+  /// The storage slot of an l-value rooted at a state variable.
+  ///
+  ///  * state variable `v`              → its assigned base slot
+  ///  * `m[k]` where `m : mapping`      → `keccak256(k . slot(m))`
+  ///  * `a[i]` where `a : T[]` (dynamic)→ `keccak256(slot(a)) + i`
+  ///  * `a[i]` where `a : T[N]` (fixed) → `slot(a) + i`
+  YulExpression _storageSlotOf(Expression target) {
+    if (target is Identifier && _isStateVar(target.name)) {
+      return _slot(target.name);
+    }
+    if (target is IndexAccess) {
+      final baseSlot = _storageSlotOf(target.base);
+      final index = target.index != null
+          ? _generateExpression(target.index!)
+          : YulLiteral('0', YulLiteralKind.number);
+      final baseType = target.base.annotation;
+      if (baseType is MappingType) {
+        return YulFunctionCall(_mappingSlotHelper(), [index, baseSlot]);
+      }
+      if (baseType is ArrayType && baseType.length == null) {
+        return YulFunctionCall(_dynArraySlotHelper(), [baseSlot, index]);
+      }
+      // Fixed-size array (or unknown): elements are laid out contiguously.
+      return YulFunctionCall('add', [baseSlot, index]);
+    }
+    _diagnostics.warning(
+      'Unsupported storage location ${target.runtimeType} in IR generator',
+      location: target.location,
+    );
+    return YulLiteral('0', YulLiteralKind.number);
+  }
+
+  /// `keccak256(key . slot)` — the value slot of `mapping[key]`.
+  String _mappingSlotHelper() => _register(
+        'mapping_slot',
+        () => YulFunctionDefinition('mapping_slot', ['key', 'slot'], ['result'],
+            YulBlock([
+              _callStmt('mstore', [_n('0'), _id('key')]),
+              _callStmt('mstore', [_n('0x20'), _id('slot')]),
+              YulAssignment(['result'], _c('keccak256', [_n('0'), _n('0x40')])),
+            ])),
+      );
+
+  /// `keccak256(slot) + index` — the element slot of a dynamic array.
+  String _dynArraySlotHelper() => _register(
+        'dyn_array_slot',
+        () => YulFunctionDefinition('dyn_array_slot', ['slot', 'index'],
+            ['result'], YulBlock([
+              _callStmt('mstore', [_n('0'), _id('slot')]),
+              YulAssignment(['result'],
+                  _c('add', [_c('keccak256', [_n('0'), _n('0x20')]), _id('index')])),
+            ])),
+      );
 
   // ── Built-in value functions ───────────────────────────────────────────────
 

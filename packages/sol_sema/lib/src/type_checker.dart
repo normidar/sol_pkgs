@@ -227,15 +227,47 @@ class TypeChecker extends AstVisitor {
   @override
   void visitMemberAccess(MemberAccess node) {
     node.expression.accept(this);
-    // Member type resolution requires full type information; use errorType for now.
-    _setType(node, errorType);
+    // Built-in global members (msg.sender, block.timestamp, …) carry useful
+    // value types; everything else needs full member resolution (not yet done).
+    _setType(node, _globalMemberType(node) ?? errorType);
+  }
+
+  /// Types of the common `msg`/`block`/`tx` members, or null if unknown.
+  static SolType? _globalMemberType(MemberAccess node) {
+    final base = node.expression;
+    if (base is! Identifier) return null;
+    switch ('${base.name}.${node.memberName}') {
+      case 'msg.sender':
+      case 'tx.origin':
+      case 'block.coinbase':
+        return addressType;
+      case 'msg.value':
+      case 'block.timestamp':
+      case 'block.number':
+      case 'block.gaslimit':
+      case 'block.chainid':
+      case 'block.basefee':
+      case 'block.difficulty':
+      case 'block.prevrandao':
+      case 'tx.gasprice':
+        return uint256Type;
+      default:
+        return null;
+    }
   }
 
   @override
   void visitIndexAccess(IndexAccess node) {
     node.base.accept(this);
     node.index?.accept(this);
-    _setType(node, errorType);
+    final baseT = _typeOf(node.base);
+    if (baseT is MappingType) {
+      _setType(node, baseT.valueType);
+    } else if (baseT is ArrayType) {
+      _setType(node, baseT.elementType);
+    } else {
+      _setType(node, errorType);
+    }
   }
 
   @override

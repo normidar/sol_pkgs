@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_driver/sol_driver.dart';
+import 'package:sol_support/sol_support.dart';
 import 'package:test/test.dart';
 
 /// A deliberately small EVM interpreter — just enough opcodes to *execute* the
@@ -23,6 +24,12 @@ class MiniEvm {
   final Uint8List code;
   final Set<int> jumpdests = {};
   final Map<BigInt, BigInt> storage = {};
+
+  /// `msg.sender` returned by CALLER (overridable per test).
+  BigInt caller = BigInt.parse('00000000000000000000000000000000000000aa', radix: 16);
+
+  /// Emitted logs: each is (topics, data).
+  final List<({List<BigInt> topics, Uint8List data})> logs = [];
 
   static final BigInt _mask = (BigInt.one << 256) - BigInt.one;
 
@@ -85,6 +92,12 @@ class MiniEvm {
             push(((x >> bit) & BigInt.one) == BigInt.one ? x | ~mask : x & mask);
           }
           pc++;
+        case 0x20: // KECCAK256(offset, len)
+          final off = pop().toInt(); final len = pop().toInt();
+          final bytes = [for (var i = 0; i < len; i++) memByte(off + i)];
+          var h = BigInt.zero;
+          for (final b in keccak256(bytes)) h = (h << 8) | BigInt.from(b);
+          push(h); pc++;
         case 0x10: final a = pop(); final b = pop(); push(a < b ? BigInt.one : BigInt.zero); pc++; // LT
         case 0x11: final a = pop(); final b = pop(); push(a > b ? BigInt.one : BigInt.zero); pc++; // GT
         case 0x12: // SLT
@@ -117,8 +130,21 @@ class MiniEvm {
         case 0x50: pop(); pc++; // POP
         case 0x51: push(loadWord(memByte, pop().toInt())); pc++; // MLOAD
         case 0x52: final off = pop(); final val = pop(); storeWord(off.toInt(), val); pc++; // MSTORE
+        case 0x33: push(caller); pc++; // CALLER
+        case 0x39: // CODECOPY(destOffset, offset, len)
+          final dest = pop().toInt(); final off = pop().toInt(); final len = pop().toInt();
+          for (var i = 0; i < len; i++) {
+            memory[dest + i] = (off + i) < code.length ? code[off + i] : 0;
+          }
+          pc++;
         case 0x54: push(storage[pop()] ?? BigInt.zero); pc++; // SLOAD
         case 0x55: final k = pop(); final v = pop(); storage[k] = v; pc++; // SSTORE
+        case 0xa0: case 0xa1: case 0xa2: case 0xa3: case 0xa4: // LOG0..LOG4
+          final off = pop().toInt(); final len = pop().toInt();
+          final topics = [for (var i = 0; i < op - 0xa0; i++) pop()];
+          final data = Uint8List(len);
+          for (var i = 0; i < len; i++) data[i] = memByte(off + i);
+          logs.add((topics: topics, data: data)); pc++;
         case 0x56: pc = _jump(pop()); // JUMP
         case 0x57: // JUMPI
           final dest = pop(); final cond = pop();
@@ -211,6 +237,10 @@ BigInt _asInt(Uint8List? data) {
 /// Throws (rather than using `expect`) on any compile error so it can also be
 /// called at `group` body level, not only inside a `test`.
 Uint8List _runtimeOf(String source, String name) {
+  return _contractOf(source, name).deployedBytecode;
+}
+
+ContractOutput _contractOf(String source, String name) {
   final result = (CompilerStack()..addSource('$name.sol', source)).compile();
   final errors = result.diagnostics.where((d) => d.isError);
   if (errors.isNotEmpty) {
@@ -218,7 +248,20 @@ Uint8List _runtimeOf(String source, String name) {
   }
   final c = result.contracts[name];
   if (c == null) throw StateError('contract "$name" not produced');
-  return c.deployedBytecode;
+  return c;
+}
+
+/// Compiles, runs the *creation* bytecode (executing the constructor), and
+/// returns a runtime [MiniEvm] whose storage carries the constructor's writes.
+MiniEvm _deploy(String source, String name, {BigInt? deployer}) {
+  final c = _contractOf(source, name);
+  final creation = MiniEvm(c.bytecode);
+  if (deployer != null) creation.caller = deployer;
+  final runtimeCode = creation.call(Uint8List(0));
+  if (runtimeCode == null) throw StateError('constructor reverted');
+  final evm = MiniEvm(runtimeCode);
+  evm.storage.addAll(creation.storage);
+  return evm;
 }
 
 void main() {
@@ -422,6 +465,135 @@ contract Guard {
     });
     test('revert(reason) always reverts', () {
       expect(MiniEvm(code).call(_calldata('always()', [])), isNull);
+    });
+  });
+
+  group('mappings (keccak256 storage slots)', () {
+    final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Token {
+  mapping(address => uint256) balances;
+  mapping(address => mapping(address => uint256)) allowance;
+  function balanceOf(address who) public view returns (uint256) {
+    return balances[who];
+  }
+  function mint(uint256 amount) public {
+    balances[msg.sender] = balances[msg.sender] + amount;
+  }
+  function approve(address spender, uint256 amount) public {
+    allowance[msg.sender][spender] = amount;
+  }
+  function allowanceOf(address owner, address spender) public view returns (uint256) {
+    return allowance[owner][spender];
+  }
+}
+''', 'Token');
+
+    test('mint updates the caller\'s mapping entry', () {
+      final evm = MiniEvm(code);
+      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.zero);
+      evm.call(_calldata('mint(uint256)', [100]));
+      evm.call(_calldata('mint(uint256)', [50]));
+      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.from(150));
+      // A different key is independent / still zero.
+      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xbb]))), BigInt.zero);
+    });
+
+    test('nested mapping slot is keccak-composed correctly', () {
+      final evm = MiniEvm(code);
+      evm.call(_calldata('approve(address,uint256)', [0xbb, 777]));
+      expect(_asUint(evm.call(_calldata('allowanceOf(address,address)', [0xaa, 0xbb]))),
+          BigInt.from(777));
+      // Swapped owner/spender must map to a different (empty) slot.
+      expect(_asUint(evm.call(_calldata('allowanceOf(address,address)', [0xbb, 0xaa]))),
+          BigInt.zero);
+    });
+  });
+
+  group('constructor / events / custom errors', () {
+    const erc20 = '''
+pragma solidity ^0.8.0;
+contract Mini {
+  address owner;
+  uint256 supply;
+  mapping(address => uint256) balances;
+  event Transfer(address indexed from, address indexed to, uint256 value);
+  error Unauthorized(address who);
+
+  constructor() {
+    owner = msg.sender;
+    supply = 1000;
+    balances[msg.sender] = 1000;
+  }
+  function getSupply() public view returns (uint256) { return supply; }
+  function getOwner() public view returns (address) { return owner; }
+  function balanceOf(address a) public view returns (uint256) { return balances[a]; }
+  function transfer(address to, uint256 amt) public {
+    balances[msg.sender] = balances[msg.sender] - amt;
+    balances[to] = balances[to] + amt;
+    emit Transfer(msg.sender, to, amt);
+  }
+  function onlyOwner() public view {
+    if (msg.sender != owner) revert Unauthorized(msg.sender);
+  }
+}
+''';
+
+    test('constructor initialises storage (read back through getters)', () {
+      final evm = _deploy(erc20, 'Mini', deployer: BigInt.from(0xaa));
+      expect(_asUint(evm.call(_calldata('getSupply()', []))), BigInt.from(1000));
+      expect(_asUint(evm.call(_calldata('getOwner()', []))), BigInt.from(0xaa));
+      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.from(1000));
+    });
+
+    test('transfer moves balance and emits Transfer with correct topics', () {
+      final evm = _deploy(erc20, 'Mini', deployer: BigInt.from(0xaa));
+      evm.caller = BigInt.from(0xaa);
+      evm.logs.clear();
+      evm.call(_calldata('transfer(address,uint256)', [0xbb, 30]));
+
+      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xaa]))), BigInt.from(970));
+      expect(_asUint(evm.call(_calldata('balanceOf(address)', [0xbb]))), BigInt.from(30));
+
+      expect(evm.logs, hasLength(1));
+      final log = evm.logs.single;
+      // topic0 = keccak256("Transfer(address,address,uint256)")
+      expect(log.topics[0],
+          BigInt.parse('ddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef', radix: 16));
+      expect(log.topics[1], BigInt.from(0xaa)); // indexed from
+      expect(log.topics[2], BigInt.from(0xbb)); // indexed to
+      expect(_asUint(log.data), BigInt.from(30)); // non-indexed value
+    });
+
+    test('custom error reverts when unauthorised', () {
+      final evm = _deploy(erc20, 'Mini', deployer: BigInt.from(0xaa));
+      evm.caller = BigInt.from(0xcc); // not the owner
+      expect(evm.call(_calldata('onlyOwner()', [])), isNull);
+      evm.caller = BigInt.from(0xaa); // owner
+      expect(evm.call(_calldata('onlyOwner()', [])), isNotNull);
+    });
+
+    test('checked transfer underflow reverts (insufficient balance)', () {
+      final evm = _deploy(erc20, 'Mini', deployer: BigInt.from(0xaa));
+      evm.caller = BigInt.from(0xbb); // balance 0
+      expect(evm.call(_calldata('transfer(address,uint256)', [0xaa, 1])), isNull);
+    });
+  });
+
+  group('public state-variable getters', () {
+    final src = '''
+pragma solidity ^0.8.0;
+contract Pub {
+  uint256 public total;
+  mapping(address => uint256) public balances;
+  constructor() { total = 42; balances[msg.sender] = 7; }
+}
+''';
+    test('auto-generated scalar and mapping getters return storage', () {
+      final evm = _deploy(src, 'Pub', deployer: BigInt.from(0xaa));
+      expect(_asUint(evm.call(_calldata('total()', []))), BigInt.from(42));
+      expect(_asUint(evm.call(_calldata('balances(address)', [0xaa]))), BigInt.from(7));
+      expect(_asUint(evm.call(_calldata('balances(address)', [0xbb]))), BigInt.zero);
     });
   });
 

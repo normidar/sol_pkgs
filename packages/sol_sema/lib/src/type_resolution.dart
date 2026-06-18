@@ -15,6 +15,9 @@ SolType solTypeFromTypeName(TypeName? typeName) {
     case ArrayTypeName(:final baseType, :final length):
       final element = solTypeFromTypeName(baseType);
       return ArrayType(element, length: length is Literal ? _intLit(length) : null);
+    case MappingTypeName(:final keyType, :final valueType):
+      return MappingType(
+          solTypeFromTypeName(keyType), solTypeFromTypeName(valueType));
     default:
       return errorType;
   }
