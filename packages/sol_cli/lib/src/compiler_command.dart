@@ -15,6 +15,16 @@ int runCompiler(List<String> args) {
       'standard-json',
       help: 'Read standard-JSON from stdin, write to stdout.',
     )
+    ..addFlag('optimize', help: 'Enable Yul optimizer (not yet implemented).')
+    ..addMultiOption(
+      'remappings',
+      help: 'Import remappings (context:prefix=target).',
+    )
+    ..addOption('base-path', help: 'Base path for import resolution.')
+    ..addMultiOption(
+      'include-path',
+      help: 'Additional paths to search for imports.',
+    )
     ..addFlag('version', negatable: false, help: 'Print version and exit.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.');
 

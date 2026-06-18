@@ -39,7 +39,7 @@ class Resolver extends AstVisitor {
           _scope.declare(
             Symbol(
               name: fn.name!,
-              type: const ErrorType(),
+              type: _functionReturnType(fn),
               kind: SymbolKind.function,
             ),
           );
@@ -338,6 +338,17 @@ class Resolver extends AstVisitor {
     for (final c in node.components) {
       c?.accept(this);
     }
+  }
+
+  /// Computes the return type of a function from its return parameters.
+  static SolType _functionReturnType(FunctionDefinition fn) {
+    if (fn.returnParameters.isEmpty) return const ErrorType();
+    if (fn.returnParameters.length == 1) {
+      return solTypeFromTypeName(fn.returnParameters.first.typeName);
+    }
+    return TupleType(
+      fn.returnParameters.map((p) => solTypeFromTypeName(p.typeName)).toList(),
+    );
   }
 
   /// Names that are globally available in Solidity without declaration.

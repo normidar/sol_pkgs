@@ -475,5 +475,56 @@ void main() {
       expect(t, isA<IntType>());
       expect((t as IntType).signed, isTrue);
     });
+
+    test('function call resolves to function return type', () {
+      final diags = _newDiags();
+      final callExpr = FunctionCall(_loc(), _id('getValue'), [], []);
+      final file = _sourceFile([
+        _contract('C', [
+          _fn(
+            'test',
+            body: _block([ReturnStatement(_loc(), callExpr)]),
+            returns: [_param('', 'uint256')],
+          ),
+          _fn(
+            'getValue',
+            returns: [_param('', 'uint256')],
+            body: _block([ReturnStatement(_loc(), _lit('42'))]),
+          ),
+        ]),
+      ]);
+      Resolver(diags).resolve(file);
+      TypeChecker(diags).check(file);
+      expect(diags.diagnostics.where((d) => d.isError), isEmpty);
+      final t = callExpr.annotation;
+      expect(t, isA<IntType>(), reason: 'call should resolve to uint256');
+    });
+
+    test('member access .length on array returns uint256', () {
+      final diags = _newDiags();
+      final arrId = _id('xs');
+      final lengthAccess = MemberAccess(_loc(), arrId, 'length');
+      final file = _sourceFile([
+        _contract('C', [
+          StateVariableDeclaration(
+            _loc(),
+            ArrayTypeName(_loc(), ElementaryTypeName(_loc(), 'uint256'), null),
+            'xs',
+            Visibility.private,
+            VariableMutability.mutable,
+            null,
+          ),
+          _fn(
+            'f',
+            returns: [_param('', 'uint256')],
+            body: _block([ReturnStatement(_loc(), lengthAccess)]),
+          ),
+        ]),
+      ]);
+      Resolver(diags).resolve(file);
+      TypeChecker(diags).check(file);
+      expect(diags.diagnostics.where((d) => d.isError), isEmpty);
+      expect(lengthAccess.annotation, equals(uint256Type));
+    });
   });
 }

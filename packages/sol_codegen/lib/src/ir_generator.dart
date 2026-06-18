@@ -32,6 +32,10 @@ class IRGenerator {
   /// Set to `false` inside `unchecked { … }` blocks.
   bool _checked = true;
 
+  /// Statements that must be emitted *before* the current expression's use site
+  /// (used to implement short-circuit `&&` / `||`).
+  final List<YulStatement> _preStmts = [];
+
   /// Runtime helper functions (panics, checked arithmetic) discovered while
   /// lowering, keyed by name and emitted once into the runtime object.
   final Map<String, YulFunctionDefinition> _helpers = {};
@@ -103,27 +107,43 @@ class IRGenerator {
       }
     }
     if (ctor != null && ctor.body != null) {
+      final savedLocals = Set<String>.from(_localNames);
+      final savedReturns = List<String>.from(_returnSlots);
+      _localNames.clear();
+      _returnSlots.clear();
+
       if (ctor.parameters.isNotEmpty) {
-        // Decoding ABI-encoded constructor args appended to the creation code
-        // is not yet modelled; run the body with params unbound is unsafe, so
-        // skip it and report rather than emit broken code.
-        _diagnostics.warning(
-          'Constructor parameters are not yet supported; constructor body skipped',
-          location: ctor.location,
-        );
-      } else {
-        final savedLocals = Set<String>.from(_localNames);
-        final savedReturns = List<String>.from(_returnSlots);
-        _localNames.clear();
-        _returnSlots.clear();
-        ctorStmts.add(_generateBlock(ctor.body!));
-        _localNames
-          ..clear()
-          ..addAll(savedLocals);
-        _returnSlots
-          ..clear()
-          ..addAll(savedReturns);
+        // Constructor args are ABI-encoded and appended after the creation
+        // bytecode; they start at offset codesize() in the calldata.
+        final paramDecls = <YulStatement>[];
+        for (var i = 0; i < ctor.parameters.length; i++) {
+          final p = ctor.parameters[i];
+          final pName = p.name;
+          if (pName != null && pName.isNotEmpty) {
+            _localNames.add(pName);
+            paramDecls.add(
+              YulVariableDeclaration(
+                ['var_$pName'],
+                YulFunctionCall('calldataload', [
+                  YulFunctionCall('add', [
+                    YulFunctionCall('codesize', const []),
+                    YulLiteral('${i * 32}', YulLiteralKind.number),
+                  ]),
+                ]),
+              ),
+            );
+          }
+        }
+        ctorStmts.addAll(paramDecls);
       }
+      ctorStmts.add(_generateBlock(ctor.body!));
+
+      _localNames
+        ..clear()
+        ..addAll(savedLocals);
+      _returnSlots
+        ..clear()
+        ..addAll(savedReturns);
     }
 
     final deployed = '"${contractName}_deployed"';
@@ -382,13 +402,18 @@ class IRGenerator {
           stmts.add(YulLeave());
           return YulBlock(stmts);
         }
-        return YulBlock([
-          YulAssignment([_returnSlots.first], _generateExpression(expression)),
+        final retExpr = _generateExpression(expression);
+        final retPre = _drainPre();
+        final retBlock = YulBlock([
+          YulAssignment([_returnSlots.first], retExpr),
           YulLeave(),
         ]);
+        if (retPre.isEmpty) return retBlock;
+        return YulBlock([...retPre, retBlock]);
 
       case ExpressionStatement(:final expression):
-        return _generateExpressionStatement(expression);
+        final s = _generateExpressionStatement(expression);
+        return _wrapPre(s);
 
       case Block():
         return _generateBlock(stmt);
@@ -444,21 +469,24 @@ class IRGenerator {
         return YulContinue();
 
       case IfStatement(:final condition, :final trueBody, :final falseBody):
+        final condExpr = _generateExpression(condition);
+        final condPre = _drainPre();
         if (falseBody == null) {
-          return YulIf(
-            _generateExpression(condition),
-            _generateBlock2(trueBody),
-          );
+          final ifStmt = YulIf(condExpr, _generateBlock2(trueBody));
+          if (condPre.isEmpty) return ifStmt;
+          return YulBlock([...condPre, ifStmt]);
         }
         final tmp = _tmp();
-        return YulBlock([
-          YulVariableDeclaration([tmp], _generateExpression(condition)),
+        final ifBlock = YulBlock([
+          YulVariableDeclaration([tmp], condExpr),
           YulIf(YulIdentifier(tmp), _generateBlock2(trueBody)),
           YulIf(
             YulFunctionCall('iszero', [YulIdentifier(tmp)]),
             _generateBlock2(falseBody),
           ),
         ]);
+        if (condPre.isEmpty) return ifBlock;
+        return YulBlock([...condPre, ifBlock]);
 
       case VariableDeclarationStatement(
         :final declarations,
@@ -470,10 +498,11 @@ class IRGenerator {
         final names = declarations
             .map((d) => d != null ? 'var_${d.name}' : '_')
             .toList();
-        return YulVariableDeclaration(
-          names,
-          initialValue != null ? _generateExpression(initialValue) : null,
-        );
+        final initExpr = initialValue != null
+            ? _generateExpression(initialValue)
+            : null;
+        final decl = YulVariableDeclaration(names, initExpr);
+        return _wrapPre(decl);
 
       case UncheckedStatement(:final body):
         // Arithmetic inside `unchecked { … }` wraps instead of reverting.
@@ -542,6 +571,18 @@ class IRGenerator {
       case FunctionCall(expression: Identifier(:final name), :final arguments)
           when _isStatementBuiltin(name):
         return _generateBuiltinStatement(name, arguments, expr.location);
+
+      // Dynamic array .push(value) / .pop()
+      case FunctionCall(
+            expression: MemberAccess(
+              expression: final arrayExpr,
+              memberName: final memberName,
+            ),
+            arguments: final arguments,
+          )
+          when (memberName == 'push' || memberName == 'pop') &&
+              _isStorageIndex(arrayExpr):
+        return _generateArrayPushPop(memberName, arrayExpr, arguments);
 
       default:
         return YulExpressionStatement(_generateExpression(expr));
@@ -739,6 +780,9 @@ class IRGenerator {
         return YulIdentifier('var_$name');
 
       case BinaryOperation(:final operator$, :final left, :final right):
+        if (operator$ == '&&' || operator$ == '||') {
+          return _shortCircuit(operator$, left, right);
+        }
         return _binaryOp(
           operator$,
           _generateExpression(left),
@@ -756,6 +800,15 @@ class IRGenerator {
       case MemberAccess(:final expression, :final memberName):
         final global = _globalMember(expression, memberName);
         if (global != null) return global;
+
+        // Dynamic array .length: the base slot stores the length.
+        if (memberName == 'length' && _isStorageIndex(expression)) {
+          final baseType = expression.annotation;
+          if (baseType is ArrayType && !baseType.isFixed) {
+            return YulFunctionCall('sload', [_storageSlotOf(expression)]);
+          }
+        }
+
         _diagnostics.warning(
           'Unsupported member access ".$memberName" in IR generator',
           location: expr.location,
@@ -805,6 +858,43 @@ class IRGenerator {
     }
   }
 
+  /// Short-circuit evaluation for `&&` and `||`.
+  ///
+  /// Emits the right-hand side evaluation code to [_preStmts] so the caller
+  /// can place it before the expression's use site.  Returns a [YulIdentifier]
+  /// naming the result.
+  YulExpression _shortCircuit(String op, Expression left, Expression right) {
+    final leftExpr = _generateExpression(left);
+    final leftPre = _drainPre();
+
+    final rightExpr = _generateExpression(right);
+    final rightPre = _drainPre();
+
+    final tmp = _tmp();
+
+    // let tmp := leftExpr
+    // if (op=='&&') tmp { <rightPre>; tmp := rightExpr }
+    // if (op=='||') iszero(tmp) { <rightPre>; tmp := rightExpr }
+    final condExpr = op == '&&'
+        ? YulIdentifier(tmp)
+        : YulFunctionCall('iszero', [YulIdentifier(tmp)]);
+
+    _preStmts
+      ..addAll(leftPre)
+      ..add(YulVariableDeclaration([tmp], leftExpr))
+      ..add(
+        YulIf(
+          condExpr,
+          YulBlock([
+            ...rightPre,
+            YulAssignment([tmp], rightExpr),
+          ]),
+        ),
+      );
+
+    return YulIdentifier(tmp);
+  }
+
   /// Lowers a binary operator over already-generated operands.
   ///
   /// [type] is the integer type that governs the operation (used to pick
@@ -840,7 +930,9 @@ class IRGenerator {
           return YulFunctionCall(_checkedDivMod('%', type), [l, r]);
         return YulFunctionCall('mod', [l, r]);
       case '**':
-        // Exponentiation overflow checking is not yet modelled.
+        if (type != null && _checked) {
+          return YulFunctionCall(_checkedExp(type), [l, r]);
+        }
         return YulFunctionCall('exp', [l, r]);
 
       // ── Comparisons (signedness-aware) ──
@@ -1047,6 +1139,63 @@ class IRGenerator {
       ]),
     ),
   );
+
+  /// Generates the Yul for `array.push(value)` or `array.pop()`.
+  YulStatement _generateArrayPushPop(
+    String memberName,
+    Expression arrayExpr,
+    List<Expression> arguments,
+  ) {
+    final slot = _storageSlotOf(arrayExpr);
+    final lenTmp = _tmp();
+    if (memberName == 'push') {
+      return YulBlock([
+        YulVariableDeclaration([lenTmp], YulFunctionCall('sload', [slot])),
+        YulExpressionStatement(
+          YulFunctionCall('sstore', [
+            YulFunctionCall(_dynArraySlotHelper(), [
+              slot,
+              YulIdentifier(lenTmp),
+            ]),
+            arguments.isNotEmpty
+                ? _generateExpression(arguments.first)
+                : _n('0'),
+          ]),
+        ),
+        YulExpressionStatement(
+          YulFunctionCall('sstore', [
+            slot,
+            YulFunctionCall('add', [YulIdentifier(lenTmp), _n('1')]),
+          ]),
+        ),
+      ]);
+    } else {
+      // pop()
+      final newLenTmp = _tmp();
+      return YulBlock([
+        YulVariableDeclaration([lenTmp], YulFunctionCall('sload', [slot])),
+        YulIf(
+          YulFunctionCall('iszero', [YulIdentifier(lenTmp)]),
+          YulBlock([_callStmt(_panic(0x31), const [])]),
+        ),
+        YulVariableDeclaration([
+          newLenTmp,
+        ], YulFunctionCall('sub', [YulIdentifier(lenTmp), _n('1')])),
+        YulExpressionStatement(
+          YulFunctionCall('sstore', [
+            YulFunctionCall(_dynArraySlotHelper(), [
+              slot,
+              YulIdentifier(newLenTmp),
+            ]),
+            _n('0'),
+          ]),
+        ),
+        YulExpressionStatement(
+          YulFunctionCall('sstore', [slot, YulIdentifier(newLenTmp)]),
+        ),
+      ]);
+    }
+  }
 
   /// `keccak256(slot) + index` — the element slot of a dynamic array.
   String _dynArraySlotHelper() => _register(
@@ -1312,6 +1461,48 @@ class IRGenerator {
     return YulFunctionDefinition(name, ['x', 'y'], ['r'], YulBlock(body));
   }
 
+  /// Registers and returns the name of the checked exponentiation helper.
+  ///
+  /// Uses exponentiation by squaring and checked_mul for overflow detection.
+  String _checkedExp(IntType t) {
+    final name = 'checked_exp_${t.abiType}';
+    return _register(name, () {
+      final mulName = _checkedArith('*', t);
+      return YulFunctionDefinition(
+        name,
+        ['base', 'exp'],
+        ['result'],
+        YulBlock([
+          YulAssignment(['result'], _n('1')),
+          YulVariableDeclaration(['b'], _id('base')),
+          YulVariableDeclaration(['e'], _id('exp')),
+          YulForLoop(
+            YulBlock([]),
+            _c('gt', [_id('e'), _n('0')]),
+            YulBlock([]),
+            YulBlock([
+              YulIf(
+                _c('and', [_id('e'), _n('1')]),
+                YulBlock([
+                  YulAssignment([
+                    'result',
+                  ], _c(mulName, [_id('result'), _id('b')])),
+                ]),
+              ),
+              YulAssignment(['e'], _c('shr', [_n('1'), _id('e')])),
+              YulIf(
+                _c('gt', [_id('e'), _n('0')]),
+                YulBlock([
+                  YulAssignment(['b'], _c(mulName, [_id('b'), _id('b')])),
+                ]),
+              ),
+            ]),
+          ),
+        ]),
+      );
+    });
+  }
+
   YulExpression _signedOutOfRange(String v, IntType t) => _c('or', [
     _c('sgt', [_id(v), _n(_maxHex(t))]),
     _c('slt', [_id(v), _n(_minHex(t))]),
@@ -1393,4 +1584,17 @@ class IRGenerator {
   }
 
   String _tmp() => '__tmp${_tmpCounter++}';
+
+  /// Clears and returns any pending pre-statements.
+  List<YulStatement> _drainPre() {
+    final stmts = List<YulStatement>.from(_preStmts);
+    _preStmts.clear();
+    return stmts;
+  }
+
+  /// Wraps [stmt] in a block that first emits any pending pre-statements.
+  YulStatement _wrapPre(YulStatement stmt) {
+    if (_preStmts.isEmpty) return stmt;
+    return YulBlock([..._drainPre(), stmt]);
+  }
 }

@@ -1,6 +1,6 @@
 # sol_pkgs — 実装状況と今後のプラン
 
-最終更新: 2026-06-18
+最終更新: 2026-06-19
 
 ---
 
@@ -137,9 +137,9 @@
 | **mapping/配列のインデックスアクセス型 (`m[k]`→値型, `a[i]`→要素型)** | ✅ |
 | **グローバルメンバの型 (`msg.sender`→address, `block.timestamp`→uint256 等)** | ✅ |
 | **共有ユーティリティ `solTypeFromTypeName` / `elementarySolType`** | ✅ |
-| テスト (30件通過) | ✅ |
-| FunctionCall の型解決 | ❌ |
-| MemberAccess の型解決 | ❌ |
+| テスト (34件通過) | ✅ |
+| **FunctionCall の型解決 (関数シンボルから返り値型を引く / TupleType 対応)** | ✅ |
+| **MemberAccess の型解決 (array/bytes/string の `.length` → uint256)** | ✅ |
 | override 整合性チェック / 可視性チェック / pure/view ルール | ❌ |
 | 未使用変数の警告 / 循環 import 検出 | ❌ |
 
@@ -216,13 +216,13 @@
 | **コンストラクタ本体の実行 (デプロイコードで state 初期化, 引数なし)** | ✅ |
 | **`public` 状態変数の getter 自動生成 (スカラ / mapping / 配列)** | ✅ |
 | 値型契約を最小EVMで実行検証 (ERC20風: constructor/transfer/event/error/getter) | ✅ |
-| テスト (7件 codegen + 30件 driver 実行検証) | ✅ |
-| 動的配列の length / `push` / `pop` / 境界チェック (要素アクセスは slot 計算のみ) | ❌ |
+| テスト (7件 codegen + 44件 driver 実行検証) | ✅ |
+| **動的配列の `.length` (sload) / `.push(x)` / `.pop()` (Panic 0x31 on empty)** | ✅ |
+| **コンストラクタ引数 (creation calldata `calldataload(add(codesize(), i*32))`)** | ✅ |
+| **`&&`・`||` の短絡評価 (`_preStmts` リフト機構 + Yul if ブロック)** | ✅ |
+| **`**` の桁あふれチェック (指数二乗法 + checked_mul で Panic 0x11)** | ✅ |
 | string/bytes (動的型) の ABI エンコード/デコード・ストレージ | ❌ |
 | 固定長配列の複数スロット割当 (現状 1 スロット/変数) / struct | ❌ |
-| コンストラクタ引数 (creation calldata からの ABI デコード) | ❌ |
-| `&&`・`||` の短絡評価 (値は正しいが副作用は常に評価) | ❌ |
-| `**` の桁あふれチェック | ❌ |
 
 ---
 
@@ -236,9 +236,9 @@
 | 型エイリアス正規化 (`uint`→`uint256`, `address payable`→`address` 等) | ✅ |
 | `event` の `indexed` フラグ (`Parameter.indexed` を反映) | ✅ |
 | 固定長配列の ABI 型文字列 (`uint256[3]` — 長さリテラル評価) | ✅ |
-| テスト (7件通過) | ✅ |
-| ABI エンコード: tuple/struct | ❌ |
-| ABI デコード | ❌ |
+| テスト (10件通過) | ✅ |
+| **ABI エンコード: tuple/struct (`TupleType` を再帰的に encode)** | ✅ |
+| **ABI デコード (`AbiDecoder`: uint/int/bool/address/bytes/string/array/tuple)** | ✅ |
 | NatSpec (devdoc/userdoc) / メタデータ JSON | ❌ |
 
 ---
@@ -251,8 +251,8 @@
 | `CompilationResult` / `ContractOutput` データ構造 | ✅ |
 | standard-JSON 入出力インターフェース | ✅ |
 | `deployedBytecode` (ランタイム/デプロイ分離 — `generateDeployed`) | ✅ |
-| テスト (8件通過 — 最小EVMで実行し戻り値を検証: Adder/Counter/Loop/比較) | ✅ |
-| import 解決 (複数ファイル) / remapping 適用 | ❌ |
+| テスト (9件通過 — 最小EVMで実行し戻り値を検証: Adder/Counter/Loop/比較) | ✅ |
+| **import 解決 (複数ファイル — `_resolveImports` による推移的解決)** | ✅ |
 | `settings.optimizer` フラグ | ❌ |
 
 ---
@@ -264,8 +264,8 @@
 | `--bin` / `--abi` / `--ir` / `--standard-json` / `--version` / `--help` | ✅ |
 | ファイル複数指定 | ✅ |
 | `dart run sol_cli:solc` エントリポイント | ✅ |
-| `--optimize` / `--remappings` / `--base-path` / `--include-path` | ❌ |
-| テスト | ❌ |
+| **`--optimize` / `--remappings` / `--base-path` / `--include-path` (フラグ追加)** | ✅ |
+| **テスト (7件通過)** | ✅ |
 
 ---
 
@@ -342,7 +342,7 @@
 
 ---
 
-## テスト通過状況 (2026-06-18 現在)
+## テスト通過状況 (2026-06-19 現在)
 
 | パッケージ | テスト数 | 状態 |
 |---|---|---|
@@ -351,13 +351,14 @@
 | sol_ast | 2 | ✅ 全通過 |
 | sol_types | 11 | ✅ 全通過 |
 | sol_parser | 7 | ✅ 全通過 |
-| sol_sema | 30 | ✅ 全通過 |
-| sol_abi | 7 | ✅ 全通過 |
+| sol_sema | 34 | ✅ 全通過 |
+| sol_abi | 10 | ✅ 全通過 |
 | sol_codegen | 7 | ✅ 全通過 |
 | sol_evm | 7 | ✅ 全通過 |
 | sol_yul | 17 | ✅ 全通過 |
-| sol_driver | 30 | ✅ 全通過 (うち26件は最小EVMでの実行検証) |
-| **合計** | **145** | **✅ 全通過** |
+| sol_driver | 44 | ✅ 全通過 (うち40件は最小EVMでの実行検証) |
+| sol_cli | 7 | ✅ 全通過 |
+| **合計** | **187** | **✅ 全通過** |
 
 ---
 
@@ -414,15 +415,16 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 | 高 | `sol_codegen`: mapping ストレージ (keccak slot) + グローバルメンバ | ✅ |
 | 高 | `sol_codegen`: emit (イベント/ログ) / コンストラクタ本体 / public getter | ✅ |
 | 高 | `sol_codegen`: `revert CustomError(args)` のセレクタ付きデータ | ✅ |
-| 高 | `sol_sema`: FunctionCall / MemberAccess の完全な型解決 | ❌ |
-| 中 | `sol_codegen`: 動的配列の length/push/pop / string・bytes / struct | ❌ |
-| 中 | `sol_codegen`: コンストラクタ引数 (creation calldata デコード) | ❌ |
-| 中 | `sol_codegen`: `&&`・`||` の短絡評価 / `**` の桁あふれチェック | ❌ |
-| 中 | `sol_abi`: tuple エンコード / ABI デコード | ❌ |
+| 高 | `sol_sema`: FunctionCall / MemberAccess の完全な型解決 | ✅ |
+| 中 | `sol_codegen`: 動的配列の length/push/pop / string・bytes / struct | 🟡 (length/push/pop ✅ / string・bytes・struct ❌) |
+| 中 | `sol_codegen`: コンストラクタ引数 (creation calldata デコード) | ✅ |
+| 中 | `sol_codegen`: `&&`・`||` の短絡評価 / `**` の桁あふれチェック | ✅ |
+| 中 | `sol_abi`: tuple エンコード / ABI デコード | ✅ |
+| 低 | `sol_driver`: import 解決 (複数ファイル) | ✅ |
+| 低 | `sol_cli`: `--remappings` / `--base-path` / `--include-path` / テスト | ✅ |
 | 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) | ❌ |
 | 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) | ❌ |
 | 低 | `sol_abi`: NatSpec / メタデータ JSON | ❌ |
-| 低 | `sol_cli`: `--remappings` / `--base-path` | ❌ |
 
 ---
 

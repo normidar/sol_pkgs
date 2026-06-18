@@ -218,18 +218,46 @@ class TypeChecker extends AstVisitor {
 
   @override
   void visitFunctionCall(FunctionCall node) {
+    // Capture the symbol annotation *before* visiting the expression, because
+    // visitIdentifier will overwrite it with the SolType.
+    final callee = node.expression;
+    sema.Symbol? funcSym;
+    if (callee is Identifier) {
+      final ann = callee.annotation;
+      if (ann is sema.Symbol && ann.kind == sema.SymbolKind.function) {
+        funcSym = ann;
+      }
+    }
+
     node.expression.accept(this);
     for (final a in node.arguments) a.accept(this);
-    // Type of a call is not yet resolved without full type info — use errorType.
+
+    if (funcSym != null) {
+      _setType(node, funcSym.type);
+      return;
+    }
     _setType(node, errorType);
   }
 
   @override
   void visitMemberAccess(MemberAccess node) {
     node.expression.accept(this);
-    // Built-in global members (msg.sender, block.timestamp, …) carry useful
-    // value types; everything else needs full member resolution (not yet done).
-    _setType(node, _globalMemberType(node) ?? errorType);
+
+    final global = _globalMemberType(node);
+    if (global != null) {
+      _setType(node, global);
+      return;
+    }
+
+    final baseType = _typeOf(node.expression);
+    if (node.memberName == 'length' &&
+        (baseType is ArrayType ||
+            baseType is BytesType ||
+            baseType is StringType)) {
+      _setType(node, uint256Type);
+      return;
+    }
+    _setType(node, errorType);
   }
 
   /// Types of the common `msg`/`block`/`tx` members, or null if unknown.

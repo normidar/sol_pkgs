@@ -29,15 +29,23 @@ class CompilerStack {
     final contracts = <String, ContractOutput>{};
 
     try {
+      // First pass: parse all provided sources.
+      final asts = <String, SourceFile>{};
       for (final entry in _sources.entries) {
         final unit = _registry.add(entry.key, entry.value);
         final ast = _parse(unit);
-        if (ast == null) continue;
+        if (ast != null) asts[entry.key] = ast;
+      }
 
-        _analyse(ast);
+      // Resolve imports: add transitively imported sources.
+      _resolveImports(asts);
+
+      // Second pass: analyse and compile.
+      for (final entry in asts.entries) {
+        _analyse(entry.value);
         if (_diagnostics.hasErrors) continue;
 
-        for (final contract in ast.declarations) {
+        for (final contract in entry.value.declarations) {
           final output = _compileContract(contract);
           if (output != null) {
             contracts[contract.name] = output;
@@ -52,6 +60,26 @@ class CompilerStack {
       diagnostics: _diagnostics.diagnostics,
       contracts: contracts,
     );
+  }
+
+  void _resolveImports(Map<String, SourceFile> asts) {
+    // Repeatedly scan all parsed files for imports until stable.
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (final ast in List<SourceFile>.from(asts.values)) {
+        for (final imp in ast.imports) {
+          if (!asts.containsKey(imp.path) && _sources.containsKey(imp.path)) {
+            final unit = _registry.add(imp.path, _sources[imp.path]!);
+            final impAst = _parse(unit);
+            if (impAst != null) {
+              asts[imp.path] = impAst;
+              changed = true;
+            }
+          }
+        }
+      }
+    }
   }
 
   SourceFile? _parse(SourceUnit unit) {

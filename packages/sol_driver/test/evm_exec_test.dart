@@ -190,6 +190,12 @@ class MiniEvm {
         case 0x35:
           push(loadWord(calldataByte, pop().toInt()));
           pc++; // CALLDATALOAD
+        case 0x36:
+          push(BigInt.from(calldata.length));
+          pc++; // CALLDATASIZE
+        case 0x38:
+          push(BigInt.from(code.length));
+          pc++; // CODESIZE
         case 0x50:
           pop();
           pc++; // POP
@@ -816,6 +822,192 @@ contract Cast {
         _asUint(MiniEvm(code).call(_calldata('toU8(uint256)', [0x42]))),
         BigInt.from(0x42),
       );
+    });
+  });
+
+  group('short-circuit && / ||', () {
+    final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Logic {
+  function andOp(bool a, bool b) public pure returns (bool) { return a && b; }
+  function orOp(bool a, bool b) public pure returns (bool) { return a || b; }
+}
+''', 'Logic');
+    final evm = MiniEvm(code);
+
+    test('&& true && true == true', () {
+      expect(
+        _asUint(evm.call(_calldata('andOp(bool,bool)', [1, 1]))),
+        BigInt.one,
+      );
+    });
+    test('&& true && false == false', () {
+      expect(
+        _asUint(evm.call(_calldata('andOp(bool,bool)', [1, 0]))),
+        BigInt.zero,
+      );
+    });
+    test('&& false && true == false', () {
+      expect(
+        _asUint(evm.call(_calldata('andOp(bool,bool)', [0, 1]))),
+        BigInt.zero,
+      );
+    });
+    test('|| false || false == false', () {
+      expect(
+        _asUint(evm.call(_calldata('orOp(bool,bool)', [0, 0]))),
+        BigInt.zero,
+      );
+    });
+    test('|| false || true == true', () {
+      expect(
+        _asUint(evm.call(_calldata('orOp(bool,bool)', [0, 1]))),
+        BigInt.one,
+      );
+    });
+    test('|| true || false == true', () {
+      expect(
+        _asUint(evm.call(_calldata('orOp(bool,bool)', [1, 0]))),
+        BigInt.one,
+      );
+    });
+  });
+
+  group('exponentiation **', () {
+    final code = _runtimeOf('''
+pragma solidity ^0.8.0;
+contract Exp {
+  function pow(uint256 base, uint256 exp) public pure returns (uint256) {
+    return base ** exp;
+  }
+  function pow8(uint8 base, uint8 exp) public pure returns (uint8) {
+    return base ** exp;
+  }
+}
+''', 'Exp');
+
+    test('2 ** 10 == 1024', () {
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('pow(uint256,uint256)', [2, 10]))),
+        BigInt.from(1024),
+      );
+    });
+
+    test('3 ** 0 == 1', () {
+      expect(
+        _asUint(MiniEvm(code).call(_calldata('pow(uint256,uint256)', [3, 0]))),
+        BigInt.one,
+      );
+    });
+
+    test('uint8 overflow on ** reverts', () {
+      // 2 ** 8 = 256, which overflows uint8 (max 255)
+      expect(
+        MiniEvm(code).call(_calldata('pow8(uint8,uint8)', [2, 8])),
+        isNull,
+        reason: '2**8 = 256 overflows uint8',
+      );
+    });
+  });
+
+  group('constructor with parameters', () {
+    test('constructor stores parameter in storage', () {
+      final src = '''
+pragma solidity ^0.8.0;
+contract Initialized {
+  uint256 value;
+  constructor(uint256 v) {
+    value = v;
+  }
+  function get() public view returns (uint256) { return value; }
+}
+''';
+      final c = _contractOf(src, 'Initialized');
+      // In the EVM, a deployment transaction passes the entire bytecode (creation
+      // code + ABI-encoded constructor args) as its "calldata".  The creation code
+      // calls codesize() to find where the args start.  We must therefore prepend
+      // the creation bytecode to the encoded arg so that calldataload(codesize())
+      // lands on the right bytes.
+      final arg = Uint8List(32);
+      arg[31] = 42; // ABI-encoded uint256(42)
+      final fullCalldata = Uint8List.fromList([...c.bytecode, ...arg]);
+      final creation = MiniEvm(c.bytecode);
+      final runtimeCode = creation.call(fullCalldata);
+      expect(runtimeCode, isNotNull, reason: 'constructor must not revert');
+      final evm = MiniEvm(runtimeCode!);
+      evm.storage.addAll(creation.storage);
+      expect(_asUint(evm.call(_calldata('get()', []))), BigInt.from(42));
+    });
+  });
+
+  group('dynamic array push/pop/length', () {
+    final src = '''
+pragma solidity ^0.8.0;
+contract DynArray {
+  uint256[] items;
+  function push(uint256 v) public { items.push(v); }
+  function pop() public { items.pop(); }
+  function length() public view returns (uint256) { return items.length; }
+  function get(uint256 i) public view returns (uint256) { return items[i]; }
+}
+''';
+
+    test('push increments length and stores value', () {
+      final evm = _deploy(src, 'DynArray');
+      expect(_asUint(evm.call(_calldata('length()', []))), BigInt.zero);
+      evm.call(_calldata('push(uint256)', [10]));
+      evm.call(_calldata('push(uint256)', [20]));
+      expect(_asUint(evm.call(_calldata('length()', []))), BigInt.from(2));
+      expect(
+        _asUint(evm.call(_calldata('get(uint256)', [0]))),
+        BigInt.from(10),
+      );
+      expect(
+        _asUint(evm.call(_calldata('get(uint256)', [1]))),
+        BigInt.from(20),
+      );
+    });
+
+    test('pop decrements length', () {
+      final evm = _deploy(src, 'DynArray');
+      evm.call(_calldata('push(uint256)', [5]));
+      evm.call(_calldata('push(uint256)', [6]));
+      evm.call(_calldata('pop()', []));
+      expect(_asUint(evm.call(_calldata('length()', []))), BigInt.one);
+    });
+
+    test('pop on empty array reverts (Panic 0x31)', () {
+      final evm = _deploy(src, 'DynArray');
+      expect(
+        evm.call(_calldata('pop()', [])),
+        isNull,
+        reason: 'pop on empty array should Panic',
+      );
+    });
+  });
+
+  group('import resolution', () {
+    test('two-file compilation resolves contract from import', () {
+      final libSrc = '''
+pragma solidity ^0.8.0;
+contract Lib {
+  function double(uint256 x) public pure returns (uint256) { return x * 2; }
+}
+''';
+      final mainSrc = '''
+pragma solidity ^0.8.0;
+import "Lib.sol";
+contract Main {
+  function run(uint256 x) public pure returns (uint256) { return x + 1; }
+}
+''';
+      final stack = CompilerStack()
+        ..addSource('Lib.sol', libSrc)
+        ..addSource('Main.sol', mainSrc);
+      final result = stack.compile();
+      expect(result.diagnostics.where((d) => d.isError), isEmpty);
+      expect(result.contracts.containsKey('Lib'), isTrue);
+      expect(result.contracts.containsKey('Main'), isTrue);
     });
   });
 }

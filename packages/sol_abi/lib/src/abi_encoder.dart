@@ -79,6 +79,14 @@ class AbiEncoder {
         }
         return builder.toBytes();
 
+      case TupleType(:final components):
+        final inner = <(SolType, Object?)>[];
+        final list = value as List;
+        for (var i = 0; i < components.length; i++) {
+          inner.add((components[i], i < list.length ? list[i] : null));
+        }
+        return encode(inner);
+
       default:
         throw UnsupportedError(
           'ABI encoding not implemented for ${type.abiType}',
