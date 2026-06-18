@@ -117,6 +117,77 @@ contract K {
     });
   });
 
+  group('NatSpec / metadata end-to-end', () {
+    const documented = '''
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+/// @title Adder
+/// @author Carol
+/// @notice Adds numbers
+contract Adder {
+  /// @notice Returns the sum of a and b
+  /// @param a first
+  /// @param b second
+  /// @return the sum
+  function getSum(uint256 a, uint256 b) public pure returns (uint256) {
+    return a + b;
+  }
+}
+''';
+
+    test('produces devdoc/userdoc/metadata from doc comments', () {
+      final c = (CompilerStack()..addSource('Adder.sol', documented))
+          .compile()
+          .contracts['Adder']!;
+
+      expect(c.userdoc['notice'], 'Adds numbers');
+      expect(
+        c.userdoc['methods']['getSum(uint256,uint256)']['notice'],
+        'Returns the sum of a and b',
+      );
+      expect(c.devdoc['title'], 'Adder');
+      expect(c.devdoc['author'], 'Carol');
+      expect(c.devdoc['methods']['getSum(uint256,uint256)']['params'], {
+        'a': 'first',
+        'b': 'second',
+      });
+
+      expect(c.metadata['language'], 'Solidity');
+      expect(c.metadata['settings']['compilationTarget'], {
+        'Adder.sol': 'Adder',
+      });
+      expect(c.metadata['sources']['Adder.sol']['license'], 'MIT');
+    });
+
+    test('standard-json surfaces devdoc/userdoc/metadata', () {
+      final input = jsonEncode({
+        'language': 'Solidity',
+        'sources': {
+          'Adder.sol': {'content': documented},
+        },
+        'settings': {
+          'outputSelection': {
+            '*': {
+              '*': ['abi', 'devdoc', 'userdoc', 'metadata'],
+            },
+          },
+        },
+      });
+      final out =
+          jsonDecode(StandardJson().compile(input)) as Map<String, dynamic>;
+      final adder = out['contracts']['Adder']['Adder'] as Map<String, dynamic>;
+      expect(adder['userdoc']['notice'], 'Adds numbers');
+      expect(adder['devdoc']['author'], 'Carol');
+      // metadata is serialised as a JSON string, like solc.
+      expect(adder['metadata'], isA<String>());
+      expect(
+        (jsonDecode(adder['metadata'] as String)
+            as Map<String, dynamic>)['language'],
+        'Solidity',
+      );
+    });
+  });
+
   group('StandardJson', () {
     test('round-trips standard-json format', () {
       final input = jsonEncode({

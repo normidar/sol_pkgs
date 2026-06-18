@@ -283,4 +283,151 @@ void main() {
       expect(tuple[1], isTrue);
     });
   });
+
+  group('NatSpec.parse', () {
+    test('implicit notice from untagged text', () {
+      final ns = NatSpec.parse('Adds two numbers together.');
+      expect(ns.notice, 'Adds two numbers together.');
+    });
+
+    test('parses the standard tags', () {
+      final ns = NatSpec.parse('''
+@title Math
+@author Alice
+@notice Adds two numbers
+@dev Uses checked arithmetic
+@param a The first addend
+@param b The second addend
+@return The sum''');
+      expect(ns.title, 'Math');
+      expect(ns.author, 'Alice');
+      expect(ns.notice, 'Adds two numbers');
+      expect(ns.dev, 'Uses checked arithmetic');
+      expect(ns.params, {'a': 'The first addend', 'b': 'The second addend'});
+      expect(ns.returns, ['The sum']);
+    });
+
+    test('collapses multi-line tag content', () {
+      final ns = NatSpec.parse('@dev line one\n     line two');
+      expect(ns.dev, 'line one line two');
+    });
+
+    test('captures @custom: tags', () {
+      final ns = NatSpec.parse('@custom:security audited by X');
+      expect(ns.custom, {'security': 'audited by X'});
+    });
+
+    test('empty for null/blank input', () {
+      expect(NatSpec.parse(null).isEmpty, isTrue);
+      expect(NatSpec.parse('   ').isEmpty, isTrue);
+    });
+  });
+
+  group('DocGenerator', () {
+    ContractDefinition documentedContract() {
+      final getSum =
+          FunctionDefinition(
+              location: loc,
+              kind: FunctionKind.function,
+              name: 'getSum',
+              parameters: [
+                Parameter(
+                  loc,
+                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                  'a',
+                  null,
+                ),
+                Parameter(
+                  loc,
+                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                  'b',
+                  null,
+                ),
+              ],
+              returnParameters: [
+                Parameter(
+                  loc,
+                  ElementaryTypeName(loc, 'uint256', intWidth: 256),
+                  null,
+                  null,
+                ),
+              ],
+              visibility: Visibility.public,
+              stateMutability: StateMutability.pure,
+              isVirtual: false,
+              overrideSpecifier: [],
+              modifiers: [],
+            )
+            ..documentation =
+                '@notice Adds a and b\n@param a first\n@param b second\n@return the sum';
+
+      final transfer = EventDefinition(loc, 'Transfer', [
+        Parameter(loc, ElementaryTypeName(loc, 'address'), 'to', null),
+      ], false)..documentation = '@notice Emitted on transfer';
+
+      return ContractDefinition(loc, ContractKind.contract, 'Math', [], [
+        getSum,
+        transfer,
+      ])..documentation = '@title Math library\n@author Bob\n@notice Does math';
+    }
+
+    test('userdoc carries @notice for contract and methods', () {
+      final ud = DocGenerator().userdoc(documentedContract());
+      expect(ud['kind'], 'user');
+      expect(ud['notice'], 'Does math');
+      expect(
+        ud['methods']['getSum(uint256,uint256)']['notice'],
+        'Adds a and b',
+      );
+      expect(
+        ud['events']['Transfer(address)']['notice'],
+        'Emitted on transfer',
+      );
+    });
+
+    test('devdoc carries title/author/params/returns', () {
+      final dd = DocGenerator().devdoc(documentedContract());
+      expect(dd['kind'], 'dev');
+      expect(dd['title'], 'Math library');
+      expect(dd['author'], 'Bob');
+      final method = dd['methods']['getSum(uint256,uint256)'];
+      expect(method['params'], {'a': 'first', 'b': 'second'});
+      // Unnamed single return is keyed _0.
+      expect(method['returns'], {'_0': 'the sum'});
+    });
+  });
+
+  group('MetadataGenerator', () {
+    test('produces solc-shaped metadata with source hash and abi', () {
+      const source = '''
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+contract Empty {}
+''';
+      final contract = ContractDefinition(
+        loc,
+        ContractKind.contract,
+        'Empty',
+        [],
+        [],
+      )..documentation = '@title Empty';
+      final meta = const MetadataGenerator().generate(
+        sourcePath: 'Empty.sol',
+        sourceContent: source,
+        contract: contract,
+        optimizerEnabled: true,
+        optimizerRuns: 200,
+      );
+
+      expect(meta['language'], 'Solidity');
+      expect(meta['version'], 1);
+      expect(meta['settings']['compilationTarget'], {'Empty.sol': 'Empty'});
+      expect(meta['settings']['optimizer'], {'enabled': true, 'runs': 200});
+      expect(meta['output']['abi'], isA<List>());
+      expect(meta['output']['devdoc']['title'], 'Empty');
+      final src = meta['sources']['Empty.sol'] as Map<String, dynamic>;
+      expect((src['keccak256'] as String).startsWith('0x'), isTrue);
+      expect(src['license'], 'MIT');
+    });
+  });
 }

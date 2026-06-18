@@ -10,6 +10,12 @@ abstract class AstNode {
   /// Annotation slot used by later compiler phases (sema, codegen).
   Object? annotation;
 
+  /// Raw NatSpec documentation attached to this node, with the comment markers
+  /// (`///`, `/**`, `*/`, leading `*`) stripped but tags such as `@notice`
+  /// kept. Populated by the parser for the declaration a doc-comment precedes;
+  /// `null` when undocumented.
+  String? documentation;
+
   void accept(AstVisitor visitor);
 }
 

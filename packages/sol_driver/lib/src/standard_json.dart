@@ -47,10 +47,13 @@ class StandardJson {
       contracts[entry.key] = {
         entry.value.name: {
           'abi': entry.value.abi,
+          'devdoc': entry.value.devdoc,
+          'userdoc': entry.value.userdoc,
+          'metadata': jsonEncode(entry.value.metadata),
+          'ir': entry.value.yulIr,
           'evm': {
             'bytecode': {'object': entry.value.bytecodeHex},
           },
-          'ir': entry.value.yulIr,
         },
       };
     }

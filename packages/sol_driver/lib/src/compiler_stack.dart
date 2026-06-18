@@ -53,7 +53,11 @@ class CompilerStack {
         if (_diagnostics.hasErrors) continue;
 
         for (final contract in entry.value.declarations) {
-          final output = _compileContract(contract);
+          final output = _compileContract(
+            contract,
+            sourcePath: entry.key,
+            sourceContent: _sources[entry.key] ?? '',
+          );
           if (output != null) {
             contracts[contract.name] = output;
           }
@@ -117,7 +121,11 @@ class CompilerStack {
     }
   }
 
-  ContractOutput? _compileContract(ContractDefinition contract) {
+  ContractOutput? _compileContract(
+    ContractDefinition contract, {
+    required String sourcePath,
+    required String sourceContent,
+  }) {
     try {
       var yulObj = IRGenerator(_diagnostics).generateContract(contract);
       if (optimize) {
@@ -127,6 +135,13 @@ class CompilerStack {
       final bytecode = YulCodeGenerator().generate(yulObj);
       final deployedBytecode = YulCodeGenerator().generateDeployed(yulObj);
       final abi = AbiGenerator().generate(contract);
+      final docs = DocGenerator();
+      final metadata = const MetadataGenerator().generate(
+        sourcePath: sourcePath,
+        sourceContent: sourceContent,
+        contract: contract,
+        optimizerEnabled: optimize,
+      );
 
       return ContractOutput(
         name: contract.name,
@@ -134,6 +149,9 @@ class CompilerStack {
         deployedBytecode: deployedBytecode,
         abi: abi,
         yulIr: yulIr,
+        devdoc: docs.devdoc(contract),
+        userdoc: docs.userdoc(contract),
+        metadata: metadata,
       );
     } catch (e) {
       _diagnostics.error('Code generation failed for ${contract.name}: $e');

@@ -82,4 +82,45 @@ contract Adder {
       expect(ast.imports.first.path, '"path/to/File.sol"');
     });
   });
+
+  group('Parser – NatSpec', () {
+    test('captures /// doc on a contract without errors', () {
+      final diagnostics = DiagnosticCollector();
+      final tokens = Lexer(
+        source: '/// @title Foo\n/// @notice Does things\ncontract Foo {}',
+        sourceIndex: 0,
+      ).tokenize();
+      final ast = Parser(
+        tokens: tokens,
+        sourceIndex: 0,
+        diagnostics: diagnostics,
+      ).parse();
+
+      expect(diagnostics.diagnostics.where((d) => d.isError), isEmpty);
+      expect(
+        ast.declarations.first.documentation,
+        '@title Foo\n@notice Does things',
+      );
+    });
+
+    test('captures /** */ doc on a function', () {
+      final ast = parse('''
+contract C {
+  /**
+   * @notice Adds
+   * @param a first
+   */
+  function add(uint256 a) public {}
+}
+''');
+      final fn = ast.declarations.first.members.first as FunctionDefinition;
+      expect(fn.documentation, '@notice Adds\n@param a first');
+    });
+
+    test('undocumented members have null documentation', () {
+      final ast = parse('contract C { function f() public {} }');
+      final fn = ast.declarations.first.members.first as FunctionDefinition;
+      expect(fn.documentation, isNull);
+    });
+  });
 }
