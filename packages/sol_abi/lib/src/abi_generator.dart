@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:sol_ast/sol_ast.dart';
+import 'abi_signature.dart';
 
 /// Generates the Solidity ABI JSON for a [ContractDefinition].
 ///
@@ -44,7 +45,7 @@ class AbiGenerator {
         'name': ev.name,
         'inputs': ev.parameters.map((p) {
           final entry = _paramEntry(p);
-          entry['indexed'] = false; // TODO: track indexed keyword
+          entry['indexed'] = p.indexed;
           return entry;
         }).toList(),
         'anonymous': ev.anonymous,
@@ -62,18 +63,8 @@ class AbiGenerator {
       };
 
   String _typeString(TypeName typeName) {
-    switch (typeName) {
-      case ElementaryTypeName(:final name):
-        return name;
-      case ArrayTypeName(:final baseType, :final length):
-        final base = _typeString(baseType);
-        return length == null ? '$base[]' : '$base[TODO]';
-      case MappingTypeName():
-        return 'mapping'; // mappings not in ABI directly
-      case UserDefinedTypeName(:final nameParts):
-        return nameParts.last; // simplified
-      default:
-        return 'unknown';
-    }
+    // Mappings never appear in an ABI; everything else uses the canonical form.
+    if (typeName is MappingTypeName) return 'mapping';
+    return abiCanonicalType(typeName);
   }
 }

@@ -16,6 +16,8 @@ dependencies:
     path: ../sol_types
   sol_yul:
     path: ../sol_yul
+  sol_abi:
+    path: ../sol_abi
 
 dev_dependencies:
   lints: ^4.0.0
