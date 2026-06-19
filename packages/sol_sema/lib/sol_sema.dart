@@ -6,3 +6,5 @@ export 'src/resolver.dart';
 export 'src/type_checker.dart';
 export 'src/type_resolution.dart';
 export 'src/c3_lineariser.dart';
+export 'src/contract_checker.dart';
+export 'src/import_graph.dart';

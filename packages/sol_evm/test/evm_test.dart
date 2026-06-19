@@ -50,4 +50,55 @@ void main() {
       expect(bytes.contains(Opcode.JUMPDEST.byte), isTrue);
     });
   });
+
+  group('BytecodeLinker', () {
+    const linker = BytecodeLinker();
+    const name = 'contracts/Math.sol:SafeMath';
+
+    test('placeholder is the modern 40-char __\$..\$__ token', () {
+      final ph = BytecodeLinker.placeholderFor(name);
+      expect(ph.length, 40);
+      expect(ph.startsWith(r'__$'), isTrue);
+      expect(ph.endsWith(r'$__'), isTrue);
+      expect(RegExp(r'^__\$[0-9a-f]{34}\$__$').hasMatch(ph), isTrue);
+    });
+
+    test('links placeholder to a 20-byte address', () {
+      final ph = BytecodeLinker.placeholderFor(name);
+      final unlinked =
+          '6080$ph'
+          '00';
+      final linked = linker.link(unlinked, {
+        name: '0x1234567890123456789012345678901234567890',
+      });
+      expect(
+        linked,
+        '60801234567890123456789012345678901234567890'
+        '00',
+      );
+      expect(linker.isLinked(linked), isTrue);
+    });
+
+    test('left-pads a short address to 20 bytes', () {
+      final ph = BytecodeLinker.placeholderFor(name);
+      final linked = linker.link(ph, {name: '0xabcd'});
+      expect(linked, '000000000000000000000000000000000000abcd');
+    });
+
+    test('isLinked / unresolved detect leftover placeholders', () {
+      final ph = BytecodeLinker.placeholderFor(name);
+      expect(linker.isLinked(ph), isFalse);
+      expect(linker.unresolved(ph), {ph});
+      expect(linker.isLinked('6080'), isTrue);
+      expect(linker.unresolved('6080'), isEmpty);
+    });
+
+    test('rejects an over-long address', () {
+      final ph = BytecodeLinker.placeholderFor(name);
+      expect(
+        () => linker.link(ph, {name: '0x${'1' * 42}'}),
+        throwsArgumentError,
+      );
+    });
+  });
 }

@@ -11,10 +11,13 @@ class StandardJson {
   String compile(String inputJson) {
     final input = jsonDecode(inputJson) as Map<String, dynamic>;
     final sources = (input['sources'] as Map<String, dynamic>?) ?? {};
+    final settings = (input['settings'] as Map<String, dynamic>?) ?? {};
     final outputSelection =
-        (input['settings']?['outputSelection'] as Map<String, dynamic>?) ?? {};
+        (settings['outputSelection'] as Map<String, dynamic>?) ?? {};
+    final optimize =
+        (settings['optimizer'] as Map<String, dynamic>?)?['enabled'] == true;
 
-    final stack = CompilerStack();
+    final stack = CompilerStack(optimize: optimize);
     for (final entry in sources.entries) {
       final content = (entry.value as Map)['content'] as String? ?? '';
       stack.addSource(entry.key, content);
@@ -44,10 +47,13 @@ class StandardJson {
       contracts[entry.key] = {
         entry.value.name: {
           'abi': entry.value.abi,
+          'devdoc': entry.value.devdoc,
+          'userdoc': entry.value.userdoc,
+          'metadata': jsonEncode(entry.value.metadata),
+          'ir': entry.value.yulIr,
           'evm': {
             'bytecode': {'object': entry.value.bytecodeHex},
           },
-          'ir': entry.value.yulIr,
         },
       };
     }

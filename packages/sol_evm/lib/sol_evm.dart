@@ -3,3 +3,4 @@ library sol_evm;
 
 export 'src/opcode.dart';
 export 'src/assembler.dart';
+export 'src/linker.dart';

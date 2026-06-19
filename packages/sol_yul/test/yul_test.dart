@@ -280,4 +280,265 @@ void main() {
       expect(bytes, contains(0x00)); // STOP
     });
   });
+
+  group('YulParser — blocks & expressions', () {
+    test('parses let with nested function call', () {
+      final block = YulParser('{ let x := add(1, mul(2, 3)) }').parseBlock();
+      expect(block.statements, hasLength(1));
+      final decl = block.statements.single as YulVariableDeclaration;
+      expect(decl.variables, ['x']);
+      final call = decl.value as YulFunctionCall;
+      expect(call.name, 'add');
+      expect(call.arguments, hasLength(2));
+      expect((call.arguments[0] as YulLiteral).value, '1');
+      expect((call.arguments[1] as YulFunctionCall).name, 'mul');
+    });
+
+    test('parses hex and decimal number literals', () {
+      final block = YulParser('{ let x := 0xff let y := 42 }').parseBlock();
+      expect((block.statements[0] as YulVariableDeclaration).variables, ['x']);
+      expect(
+        ((block.statements[0] as YulVariableDeclaration).value as YulLiteral)
+            .value,
+        '0xff',
+      );
+    });
+
+    test('distinguishes assignment from expression statement', () {
+      final block = YulParser('{ x := 1 sstore(0, 2) }').parseBlock();
+      expect(block.statements[0], isA<YulAssignment>());
+      expect(block.statements[1], isA<YulExpressionStatement>());
+    });
+
+    test('parses multi-value declaration and assignment', () {
+      final block = YulParser('{ let a, b := f() a, b := g() }').parseBlock();
+      expect((block.statements[0] as YulVariableDeclaration).variables, [
+        'a',
+        'b',
+      ]);
+      expect((block.statements[1] as YulAssignment).variables, ['a', 'b']);
+    });
+
+    test('ignores comments and type annotations', () {
+      final block = YulParser('''
+        {
+          // line comment
+          let x : u256 := 1 : u256 /* block */
+        }
+      ''').parseBlock();
+      expect((block.statements.single as YulVariableDeclaration).variables, [
+        'x',
+      ]);
+    });
+  });
+
+  group('YulParser — statements', () {
+    test('parses function definition with params and returns', () {
+      final block = YulParser(
+        '{ function double(n) -> r { r := add(n, n) } }',
+      ).parseBlock();
+      final fn = block.statements.single as YulFunctionDefinition;
+      expect(fn.name, 'double');
+      expect(fn.parameters, ['n']);
+      expect(fn.returnVariables, ['r']);
+      expect(fn.body.statements.single, isA<YulAssignment>());
+    });
+
+    test('parses if', () {
+      final block = YulParser('{ if lt(1, 2) { sstore(0, 1) } }').parseBlock();
+      final node = block.statements.single as YulIf;
+      expect((node.condition as YulFunctionCall).name, 'lt');
+    });
+
+    test('parses switch with cases and default', () {
+      final block = YulParser('''
+        { switch x
+          case 1 { sstore(0, 1) }
+          case 2 { sstore(0, 2) }
+          default { sstore(0, 0) } }
+      ''').parseBlock();
+      final node = block.statements.single as YulSwitch;
+      expect(node.cases, hasLength(2));
+      expect(node.cases[0].value.value, '1');
+      expect(node.defaultCase, isNotNull);
+    });
+
+    test('parses for loop with break/continue', () {
+      final block = YulParser('''
+        { for { let i := 0 } lt(i, 10) { i := add(i, 1) }
+          { if i { continue } break } }
+      ''').parseBlock();
+      final loop = block.statements.single as YulForLoop;
+      expect(loop.pre.statements.single, isA<YulVariableDeclaration>());
+      expect(loop.body.statements.last, isA<YulBreak>());
+    });
+
+    test('throws on malformed input', () {
+      expect(
+        () => YulParser('{ let := 1 }').parseBlock(),
+        throwsA(isA<YulParseException>()),
+      );
+    });
+  });
+
+  group('YulParser — objects', () {
+    test('parses an object with code and sub-object', () {
+      final obj = YulParser('''
+        object "Contract" {
+          code { mstore(0, 1) return(0, 32) }
+          object "Contract_deployed" {
+            code { stop() }
+          }
+          data "meta" hex"deadbeef"
+        }
+      ''').parseObject();
+      expect(obj.name, 'Contract');
+      expect(obj.code.statements, hasLength(2));
+      expect(obj.subObjects.single.name, 'Contract_deployed');
+      expect(obj.data['meta'], [0xde, 0xad, 0xbe, 0xef]);
+    });
+
+    test('parse() auto-detects object vs block', () {
+      expect(YulParser('object "O" { code {} }').parse(), isA<YulObject>());
+      expect(YulParser('{ stop() }').parse(), isA<YulBlock>());
+    });
+  });
+
+  group('YulOptimizer — constant folding', () {
+    // Fold inside an `sstore` so the value is "used" and survives DCE.
+    String opt(String src) => YulPrinter().print(
+      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('folds nested arithmetic', () {
+      // add(2, mul(3, 4)) == 14
+      expect(
+        opt('{ sstore(0, add(2, mul(3, 4))) }'),
+        contains('sstore(0, 14)'),
+      );
+    });
+
+    test('folds comparisons to 0/1', () {
+      expect(opt('{ sstore(0, lt(1, 2)) }'), contains('sstore(0, 1)'));
+      expect(opt('{ sstore(0, gt(1, 2)) }'), contains('sstore(0, 0)'));
+      expect(opt('{ sstore(0, eq(5, 5)) }'), contains('sstore(0, 1)'));
+    });
+
+    test('folds with 256-bit wraparound on sub', () {
+      // sub(0, 1) == 2**256 - 1
+      final maxWord = ((BigInt.one << 256) - BigInt.one).toString();
+      expect(opt('{ sstore(0, sub(0, 1)) }'), contains('sstore(0, $maxWord)'));
+    });
+
+    test('folds bitwise and shifts', () {
+      expect(opt('{ sstore(0, shl(4, 1)) }'), contains('sstore(0, 16)'));
+      expect(opt('{ sstore(0, and(12, 10)) }'), contains('sstore(0, 8)'));
+    });
+
+    test('folds signed division', () {
+      // sdiv(sub(0,6), 2) == -3 (as 2**256-3)
+      final minus3 = ((BigInt.one << 256) - BigInt.from(3)).toString();
+      expect(opt('{ sstore(0, sdiv(sub(0, 6), 2)) }'), contains(minus3));
+    });
+  });
+
+  group('YulOptimizer — algebraic simplification', () {
+    String opt(String src) => YulPrinter().print(
+      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('add(x, 0) -> x', () {
+      expect(
+        opt('{ let y := 5 sstore(0, add(y, 0)) }'),
+        contains('sstore(0, y)'),
+      );
+    });
+
+    test('mul(x, 1) -> x', () {
+      expect(
+        opt('{ let y := 5 sstore(0, mul(y, 1)) }'),
+        contains('sstore(0, y)'),
+      );
+    });
+
+    test('mul(x, 0) -> 0 when side-effect-free', () {
+      expect(
+        opt('{ let y := 5 sstore(0, mul(y, 0)) }'),
+        contains('sstore(0, 0)'),
+      );
+    });
+
+    test('does not drop a side-effecting operand in mul(_, 0)', () {
+      // sstore is not pure, so mul(sstore(...), 0) must keep the call.
+      final out = opt('{ sstore(0, mul(sstore(1, 2), 0)) }');
+      expect(out, contains('sstore(1, 2)'));
+    });
+  });
+
+  group('YulOptimizer — dead-code elimination', () {
+    String opt(String src) => YulPrinter().print(
+      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('drops an unused side-effect-free binding', () {
+      final out = opt('{ let unused := add(1, 2) sstore(0, 1) }');
+      expect(out, isNot(contains('unused')));
+      expect(out, contains('sstore(0, 1)'));
+    });
+
+    test('keeps a used binding', () {
+      final out = opt('{ let x := 7 sstore(0, x) }');
+      expect(out, contains('let x := 7'));
+    });
+
+    test('keeps the side effect of an unused but impure binding', () {
+      final out = opt('{ let x := sload(0) let y := sstore(1, 2) }');
+      // y is unused; sstore must survive as a bare expression statement.
+      expect(out, contains('sstore(1, 2)'));
+      expect(out, isNot(contains('let y')));
+    });
+
+    test('removes statements after a terminator', () {
+      final out = opt('{ return(0, 32) let dead := 1 sstore(0, dead) }');
+      expect(out, contains('return(0, 32)'));
+      expect(out, isNot(contains('dead')));
+    });
+  });
+
+  group('YulOptimizer — preserves behaviour', () {
+    test('optimised object still produces bytecode', () {
+      final obj =
+          YulParser('''
+        object "C" {
+          code {
+            let x := add(mul(2, 3), 0)
+            let junk := 99
+            sstore(0, x)
+          }
+        }
+      ''').parse()
+              as YulObject;
+      final optimised = const YulOptimizer().optimize(obj);
+      final bytes = YulCodeGenerator().generate(optimised);
+      expect(bytes, isNotEmpty);
+      // The dead `junk` binding is gone, so PUSH1 99 (0x63) should not appear.
+      expect(bytes, isNot(contains(99)));
+    });
+  });
+
+  group('YulParser ↔ codegen / printer round-trip', () {
+    test('parsed block compiles to bytecode', () {
+      final block = YulParser('{ let x := add(1, 2) }').parseBlock();
+      final bytes = YulCodeGenerator().generate(_obj(block));
+      expect(bytes, isNotEmpty);
+    });
+
+    test('printer output re-parses to an equivalent tree', () {
+      const src = '{ let x := add(1, 2) if x { sstore(0, x) } }';
+      final first = YulParser(src).parseBlock();
+      final printed = YulPrinter().print(first);
+      final second = YulParser(printed).parseBlock();
+      expect(YulPrinter().print(second), printed);
+    });
+  });
 }

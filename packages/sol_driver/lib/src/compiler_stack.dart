@@ -17,6 +17,13 @@ import 'compilation_result.dart';
 ///   ..compile();
 /// ```
 class CompilerStack {
+  CompilerStack({this.optimize = false});
+
+  /// When true, the generated Yul IR is run through [YulOptimizer] before
+  /// bytecode generation (constant folding, simplification, dead-code
+  /// elimination). Mirrors solc's `settings.optimizer.enabled`.
+  final bool optimize;
+
   final SourceUnitRegistry _registry = SourceUnitRegistry();
   final DiagnosticCollector _diagnostics = DiagnosticCollector();
   final Map<String, String> _sources = {};
@@ -39,6 +46,7 @@ class CompilerStack {
 
       // Resolve imports: add transitively imported sources.
       _resolveImports(asts);
+      _reportImportCycles(asts);
 
       // Second pass: analyse and compile.
       for (final entry in asts.entries) {
@@ -46,7 +54,11 @@ class CompilerStack {
         if (_diagnostics.hasErrors) continue;
 
         for (final contract in entry.value.declarations) {
-          final output = _compileContract(contract);
+          final output = _compileContract(
+            contract,
+            sourcePath: entry.key,
+            sourceContent: _sources[entry.key] ?? '',
+          );
           if (output != null) {
             contracts[contract.name] = output;
           }
@@ -105,18 +117,59 @@ class CompilerStack {
       if (!_diagnostics.hasErrors) {
         TypeChecker(_diagnostics).visitSourceFile(ast);
       }
+      // Static checks (mutability/visibility/override/unused) are independent
+      // of type inference, so run them regardless of earlier diagnostics.
+      ContractChecker(_diagnostics).check(ast);
     } on FatalErrorException {
       // already recorded
     }
   }
 
-  ContractOutput? _compileContract(ContractDefinition contract) {
+  /// Solidity allows circular imports; we surface them as warnings so the cycle
+  /// is visible without failing the build.
+  void _reportImportCycles(Map<String, SourceFile> asts) {
+    final graph = ImportGraph();
+    for (final entry in asts.entries) {
+      graph.addImports(
+        entry.key,
+        entry.value.imports.map((i) => _unquote(i.path)),
+      );
+    }
+    for (final cycle in graph.findCycles()) {
+      _diagnostics.warning(
+        'Circular import detected: ${[...cycle, cycle.first].join(' -> ')}',
+      );
+    }
+  }
+
+  static String _unquote(String s) =>
+      (s.length >= 2 &&
+          (s.startsWith('"') || s.startsWith("'")) &&
+          (s.endsWith('"') || s.endsWith("'")))
+      ? s.substring(1, s.length - 1)
+      : s;
+
+  ContractOutput? _compileContract(
+    ContractDefinition contract, {
+    required String sourcePath,
+    required String sourceContent,
+  }) {
     try {
-      final yulObj = IRGenerator(_diagnostics).generateContract(contract);
+      var yulObj = IRGenerator(_diagnostics).generateContract(contract);
+      if (optimize) {
+        yulObj = const YulOptimizer().optimize(yulObj);
+      }
       final yulIr = YulPrinter().print(yulObj);
       final bytecode = YulCodeGenerator().generate(yulObj);
       final deployedBytecode = YulCodeGenerator().generateDeployed(yulObj);
       final abi = AbiGenerator().generate(contract);
+      final docs = DocGenerator();
+      final metadata = const MetadataGenerator().generate(
+        sourcePath: sourcePath,
+        sourceContent: sourceContent,
+        contract: contract,
+        optimizerEnabled: optimize,
+      );
 
       return ContractOutput(
         name: contract.name,
@@ -124,6 +177,9 @@ class CompilerStack {
         deployedBytecode: deployedBytecode,
         abi: abi,
         yulIr: yulIr,
+        devdoc: docs.devdoc(contract),
+        userdoc: docs.userdoc(contract),
+        metadata: metadata,
       );
     } catch (e) {
       _diagnostics.error('Code generation failed for ${contract.name}: $e');

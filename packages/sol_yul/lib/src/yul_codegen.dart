@@ -312,7 +312,9 @@ class YulCodeGenerator {
         _generateExpression(arg);
       }
       // Consume all arg slots from frame.
-      for (var i = 0; i < arguments.length; i++) _frame.pop();
+      for (var i = 0; i < arguments.length; i++) {
+        _frame.pop();
+      }
       _asm.emit(builtin);
       // Most builtins push 1 result; zero-output builtins (stop, revert, etc.)
       // are handled by _popExpressionResult checking the statement context.
@@ -334,7 +336,9 @@ class YulCodeGenerator {
       _asm.label(retLabel); // JUMPDEST — function has cleaned up and returned
 
       // After return: N+1 slots (retlabel + args) are gone; M return values remain.
-      for (var i = 0; i < arguments.length + 1; i++) _frame.pop();
+      for (var i = 0; i < arguments.length + 1; i++) {
+        _frame.pop();
+      }
       for (var i = 0; i < retCount; i++) {
         _frame.push(); // one slot per return value (none for void functions)
       }
@@ -457,21 +461,36 @@ class YulCodeGenerator {
 
     if (m == 0) {
       // No return values: pop params, then JUMP to retlabel.
-      for (var i = 0; i < n; i++) _asm.pop();
-      _asm.emit(Opcode.JUMP);
-    } else if (m == 1) {
-      // 1 return value: SWAP(1)+POP for each param to remove it while
-      // keeping r0 in place, then SWAP(1)+JUMP to jump without consuming r0.
       for (var i = 0; i < n; i++) {
-        _asm.swap(1);
         _asm.pop();
       }
-      _asm.swap(1);
       _asm.emit(Opcode.JUMP);
-    } else {
-      // M > 1 return values: not yet fully supported — emit STOP as placeholder.
-      _asm.emit(Opcode.STOP);
+      return;
     }
+
+    // General case for M ≥ 1 return values (requires M ≤ 16 for SWAPM).
+    //
+    // Stack (top→bottom): [r0, …, r(M-1), p0, …, p(N-1), retlabel, …outer].
+    //
+    // 1. Delete each parameter. The topmost parameter always sits at depth
+    //    M+1; SWAP1..SWAPM bubble it to the top while preserving the order of
+    //    the M return values above it, then POP removes it.
+    for (var i = 0; i < n; i++) {
+      for (var s = 1; s <= m; s++) {
+        _asm.swap(s);
+      }
+      _asm.pop();
+    }
+
+    // 2. Now the stack is [r0, …, r(M-1), retlabel, …outer]. Rotate the
+    //    (M+1)-element block down by one (SWAP1..SWAPM) so retlabel reaches the
+    //    top with the return values still in order beneath it…
+    for (var s = 1; s <= m; s++) {
+      _asm.swap(s);
+    }
+    // …then JUMP consumes retlabel, leaving [r0, …, r(M-1), …outer] for the
+    // caller (r0 on top), matching the multi-value call/declaration layout.
+    _asm.emit(Opcode.JUMP);
   }
 
   // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -39,6 +39,7 @@ class Parser {
 
     while (!_isEof) {
       try {
+        final doc = _collectNatSpec();
         if (_at(TokenKind.kPragma)) {
           pragmas.add(_parsePragma());
         } else if (_at(TokenKind.kImport)) {
@@ -49,7 +50,12 @@ class Parser {
           TokenKind.kLibrary,
           TokenKind.kAbstract,
         ])) {
-          contracts.add(_parseContractDefinition());
+          final contract = _parseContractDefinition();
+          if (doc != null) contract.documentation = doc;
+          contracts.add(contract);
+        } else if (doc != null) {
+          // A doc-comment with no following declaration (e.g. trailing): drop.
+          continue;
         } else {
           _errorAndSync(
             'Unexpected token "${_cur.lexeme.isEmpty ? _cur.kind.name : _cur.lexeme}" at top level',
@@ -173,9 +179,14 @@ class Parser {
   }
 
   AstNode _parseContractMember() {
-    // Skip NatSpec attached to the next member.
-    while (_atAny([TokenKind.NatSpecLine, TokenKind.NatSpecBlock])) _advance();
+    // Capture NatSpec attached to the next member.
+    final doc = _collectNatSpec();
+    final member = _parseContractMemberInner();
+    if (doc != null) member.documentation = doc;
+    return member;
+  }
 
+  AstNode _parseContractMemberInner() {
     if (_at(TokenKind.kFunction) ||
         _at(TokenKind.kConstructor) ||
         _at(TokenKind.kFallback) ||
@@ -191,6 +202,46 @@ class Parser {
     if (_at(TokenKind.kType)) return _parseUserDefinedValueType();
 
     return _parseStateVariableDeclaration();
+  }
+
+  /// Consumes consecutive NatSpec tokens and returns their combined text with
+  /// comment markers stripped, or null if there were none.
+  String? _collectNatSpec() {
+    final lexemes = <String>[];
+    while (_atAny([TokenKind.NatSpecLine, TokenKind.NatSpecBlock])) {
+      lexemes.add(_advance().lexeme);
+    }
+    if (lexemes.isEmpty) return null;
+    return _cleanNatSpec(lexemes);
+  }
+
+  /// Strips `///`, `/**`, `*/` and leading `*` markers from NatSpec lexemes,
+  /// returning the documentation body with tags such as `@notice` intact.
+  static String _cleanNatSpec(List<String> lexemes) {
+    final lines = <String>[];
+    for (final raw in lexemes) {
+      if (raw.startsWith('///')) {
+        lines.add(raw.substring(3).trim());
+      } else {
+        // Block form /** … */
+        var body = raw;
+        if (body.startsWith('/**')) body = body.substring(3);
+        if (body.endsWith('*/')) body = body.substring(0, body.length - 2);
+        for (final line in body.split('\n')) {
+          var l = line.trim();
+          if (l.startsWith('*')) l = l.substring(1).trim();
+          lines.add(l);
+        }
+      }
+    }
+    // Drop leading/trailing blank lines, keep interior structure.
+    while (lines.isNotEmpty && lines.first.isEmpty) {
+      lines.removeAt(0);
+    }
+    while (lines.isNotEmpty && lines.last.isEmpty) {
+      lines.removeLast();
+    }
+    return lines.join('\n');
   }
 
   // ── Function definition ───────────────────────────────────────────────────
@@ -224,6 +275,7 @@ class Parser {
     var visibility = Visibility.defaultVisibility;
     var mutability = StateMutability.nonpayable;
     var isVirtual = false;
+    var isOverride = false;
     final overrides = <String>[];
     final modifiers = <ModifierInvocation>[];
 
@@ -256,6 +308,7 @@ class Parser {
           _advance();
         case TokenKind.kOverride:
           _advance();
+          isOverride = true;
           if (_tryConsume(TokenKind.LParen)) {
             overrides.add(_ident());
             while (_tryConsume(TokenKind.Comma)) overrides.add(_ident());
@@ -305,6 +358,7 @@ class Parser {
       stateMutability: mutability,
       isVirtual: isVirtual,
       overrideSpecifier: overrides,
+      isOverride: isOverride,
       modifiers: modifiers,
       body: body,
     );

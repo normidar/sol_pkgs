@@ -94,7 +94,8 @@
 | エラーリカバリ (パニックモード + `_synchronize`) | ✅ |
 | 型名ヒューリスティック (`_looksLikeTypeName`) | ✅ |
 | **宣言 vs 式の曖昧性解消 (`_speculate`: 投機的パース + 診断抑制でバックトラック)** | ✅ |
-| テスト (7件通過) | ✅ |
+| **NatSpec (`///` / `/** */`) を宣言に添付 (`AstNode.documentation`)** | ✅ |
+| テスト (10件通過) | ✅ |
 
 ---
 
@@ -108,9 +109,10 @@
 | `ArrayType` (固定長・動的) / `MappingType` / `TupleType` | ✅ |
 | `FunctionType` / `TypeType` / `ErrorType` (番兵) | ✅ |
 | `isImplicitlyConvertible` / `isExplicitlyConvertible` / `commonType` | ✅ |
-| テスト (11件通過) | ✅ |
-| 有理数リテラル型 (`RationalNumberType`) | ❌ |
-| `FixedType` / `UFixedType` (固定小数点) | ❌ |
+| 値型に値等価 (`==`/`hashCode`: Int/Address/BytesN/Array/Mapping/Tuple) | ✅ |
+| **有理数リテラル型 (`RationalNumberType`: 約分・mobile 型解決・int/fixed 変換)** | ✅ |
+| **`FixedType` / `UFixedType` (固定小数点 `fixedMxN`/`ufixedMxN`)** | ✅ |
+| テスト (26件通過) | ✅ |
 
 ---
 
@@ -137,11 +139,11 @@
 | **mapping/配列のインデックスアクセス型 (`m[k]`→値型, `a[i]`→要素型)** | ✅ |
 | **グローバルメンバの型 (`msg.sender`→address, `block.timestamp`→uint256 等)** | ✅ |
 | **共有ユーティリティ `solTypeFromTypeName` / `elementarySolType`** | ✅ |
-| テスト (34件通過) | ✅ |
 | **FunctionCall の型解決 (関数シンボルから返り値型を引く / TupleType 対応)** | ✅ |
 | **MemberAccess の型解決 (array/bytes/string の `.length` → uint256)** | ✅ |
-| override 整合性チェック / 可視性チェック / pure/view ルール | ❌ |
-| 未使用変数の警告 / 循環 import 検出 | ❌ |
+| **override 整合性チェック / 可視性チェック / pure/view ルール (`ContractChecker`)** | ✅ |
+| **未使用変数の警告 / 循環 import 検出 (`ImportGraph`)** | ✅ |
+| テスト (45件通過) | ✅ |
 
 ---
 
@@ -156,8 +158,8 @@
 | 2パスラベル解決 (`PushLabelInstruction` 対応済み) | ✅ |
 | `pushDeployedOffset()` — 連結ランタイムの開始オフセット解決 (`dataoffset` 用) | ✅ |
 | 2パスのオフセット計算修正 (JUMP=4バイト / JUMPDEST=1バイト) | ✅ |
-| テスト (7件通過) | ✅ |
-| バイトコードリンカ (library address placeholder) | ❌ |
+| **バイトコードリンカ (`BytecodeLinker`: `__$<keccak[:17]>$__` placeholder 解決)** | ✅ |
+| テスト (12件通過) | ✅ |
 
 ---
 
@@ -179,10 +181,10 @@
 | `dataoffset` / `datasize` の解決 (デプロイラッパからランタイム参照) | ✅ |
 | 関数の返り値個数を記録 (void 関数呼び出しの余分な POP を防止) | ✅ |
 | `let` 宣言のフレーム二重カウント修正 / `leave` でローカルを掃除 | ✅ |
-| テスト (17件通過) | ✅ |
-| Yul パーサ (`assembly { … }` ブロック) | ❌ |
-| 複数返り値関数 (M>1) のホイスト | ❌ |
-| Yul オプティマイザ | ❌ |
+| **Yul パーサ (`YulParser`: object/block/let/if/switch/for/関数定義/break/continue/leave)** | ✅ |
+| **複数返り値関数 (M>1) のホイスト (`_emitLeave`: SWAP1..SWAPM bubble+rotate)** | ✅ |
+| **Yul オプティマイザ (`YulOptimizer`: 定数畳み込み / 代数簡約 / DCE)** | ✅ |
+| テスト (45件通過) | ✅ |
 
 ---
 
@@ -216,7 +218,7 @@
 | **コンストラクタ本体の実行 (デプロイコードで state 初期化, 引数なし)** | ✅ |
 | **`public` 状態変数の getter 自動生成 (スカラ / mapping / 配列)** | ✅ |
 | 値型契約を最小EVMで実行検証 (ERC20風: constructor/transfer/event/error/getter) | ✅ |
-| テスト (7件 codegen + 44件 driver 実行検証) | ✅ |
+| テスト (7件 codegen + 58件 driver 実行検証) | ✅ |
 | **動的配列の `.length` (sload) / `.push(x)` / `.pop()` (Panic 0x31 on empty)** | ✅ |
 | **コンストラクタ引数 (creation calldata `calldataload(add(codesize(), i*32))`)** | ✅ |
 | **`&&`・`||` の短絡評価 (`_preStmts` リフト機構 + Yul if ブロック)** | ✅ |
@@ -236,24 +238,27 @@
 | 型エイリアス正規化 (`uint`→`uint256`, `address payable`→`address` 等) | ✅ |
 | `event` の `indexed` フラグ (`Parameter.indexed` を反映) | ✅ |
 | 固定長配列の ABI 型文字列 (`uint256[3]` — 長さリテラル評価) | ✅ |
-| テスト (10件通過) | ✅ |
 | **ABI エンコード: tuple/struct (`TupleType` を再帰的に encode)** | ✅ |
 | **ABI デコード (`AbiDecoder`: uint/int/bool/address/bytes/string/array/tuple)** | ✅ |
-| NatSpec (devdoc/userdoc) / メタデータ JSON | ❌ |
+| **NatSpec タグ解析 (`NatSpec`) + devdoc/userdoc 生成 (`DocGenerator`)** | ✅ |
+| **メタデータ JSON (`MetadataGenerator`: compiler/output/settings/sources+keccak)** | ✅ |
+| テスト (24件通過) | ✅ |
 
 ---
 
-### `sol_driver` 🟡 完成度: 低〜中
+### `sol_driver` ✅ 完成度: 中〜高
 
 | 機能 | 状態 |
 |---|---|
 | `CompilerStack.addSource` / `compile` パイプライン | ✅ |
-| `CompilationResult` / `ContractOutput` データ構造 | ✅ |
-| standard-JSON 入出力インターフェース | ✅ |
+| `CompilationResult` / `ContractOutput` データ構造 (devdoc/userdoc/metadata 付き) | ✅ |
+| standard-JSON 入出力 (abi/ir/bytecode/devdoc/userdoc/metadata) | ✅ |
 | `deployedBytecode` (ランタイム/デプロイ分離 — `generateDeployed`) | ✅ |
-| テスト (9件通過 — 最小EVMで実行し戻り値を検証: Adder/Counter/Loop/比較) | ✅ |
 | **import 解決 (複数ファイル — `_resolveImports` による推移的解決)** | ✅ |
-| `settings.optimizer` フラグ | ❌ |
+| **`ContractChecker` 統合 (mutability/visibility/override/未使用変数)** | ✅ |
+| **循環 import 警告 (`ImportGraph`)** | ✅ |
+| **`settings.optimizer` フラグ (`CompilerStack(optimize:)` → `YulOptimizer`)** | ✅ |
+| テスト (58件通過 — うち多数は最小EVMでの実行検証) | ✅ |
 
 ---
 
@@ -336,6 +341,23 @@
 > 静かな正確性バグ。`sol_driver/test/evm_exec_test.dart` に overflow revert / unchecked wrap /
 > 符号付き比較・除算 / `require`・`assert`・`revert` / キャストの実行検証を追加して回帰を固定。
 
+## 実装した未実装機能（F-1〜F-7: 周辺機能の完成, 2026-06-19）
+
+| # | パッケージ | 内容 |
+|---|---|---|
+| F-1 | `sol_types` | **有理数リテラル型** (`RationalNumberType`: 約分・mobile 型解決) と **固定小数点型** (`FixedType`/`UFixedType`)。値型に値等価を追加 |
+| F-2 | `sol_evm` | **バイトコードリンカ** (`BytecodeLinker`): solc ≥0.5.0 の `__$<keccak[:17]>$__` placeholder を解決 |
+| F-3 | `sol_yul` | **Yul パーサ** (`YulParser`: 字句解析+再帰下降)。インライン assembly / object をパース |
+| F-4 | `sol_yul` | **複数返り値関数 (M>1) のホイスト**: `_emitLeave` を SWAP1..SWAPM の bubble+rotate で一般化。MiniEvm 実行で検証 |
+| F-5 | `sol_yul` + `sol_driver` + `sol_cli` | **Yul オプティマイザ** (`YulOptimizer`: 定数畳み込み/代数簡約/DCE) と `settings.optimizer` フラグ連携 |
+| F-6 | `sol_abi` + `sol_parser` + `sol_ast` | **NatSpec → devdoc/userdoc** (`NatSpec`/`DocGenerator`) と **メタデータ JSON** (`MetadataGenerator`)。パーサが `///`・`/** */` を宣言へ添付 |
+| F-7 | `sol_sema` + `sol_driver` | **pure/view・可視性・override チェック** (`ContractChecker`)、**未使用変数警告**、**循環 import 検出** (`ImportGraph`) |
+
+> F-4 は `sol_driver/test/evm_exec_test.dart` に手書き Yul の複数返り値関数 (identity/swap/
+> 3-return/early-leave) を MiniEvm で実行するテストを追加して正当性を固定。F-5 の DCE は当初
+> 終端後のホイスト関数定義まで除去して「Invalid jump destination 0」を誘発したため、関数定義
+> (とそれを含む文) は到達不能でも保持するよう修正済み。テスト総数 187 → 263 件。
+
 ## 残存バグ（未修正）
 
 なし（既知のバグはすべて修正済み。未実装機能は各パッケージ表の ❌ を参照）。
@@ -349,16 +371,16 @@
 | sol_support | 14 | ✅ 全通過 |
 | sol_lexer | 13 | ✅ 全通過 |
 | sol_ast | 2 | ✅ 全通過 |
-| sol_types | 11 | ✅ 全通過 |
-| sol_parser | 7 | ✅ 全通過 |
-| sol_sema | 34 | ✅ 全通過 |
-| sol_abi | 10 | ✅ 全通過 |
+| sol_types | 26 | ✅ 全通過 |
+| sol_parser | 10 | ✅ 全通過 |
+| sol_sema | 45 | ✅ 全通過 |
+| sol_abi | 24 | ✅ 全通過 |
 | sol_codegen | 7 | ✅ 全通過 |
-| sol_evm | 7 | ✅ 全通過 |
-| sol_yul | 17 | ✅ 全通過 |
-| sol_driver | 44 | ✅ 全通過 (うち40件は最小EVMでの実行検証) |
+| sol_evm | 12 | ✅ 全通過 |
+| sol_yul | 45 | ✅ 全通過 |
+| sol_driver | 58 | ✅ 全通過 (うち多数は最小EVMでの実行検証) |
 | sol_cli | 7 | ✅ 全通過 |
-| **合計** | **187** | **✅ 全通過** |
+| **合計** | **263** | **✅ 全通過** |
 
 ---
 
@@ -422,9 +444,16 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 | 中 | `sol_abi`: tuple エンコード / ABI デコード | ✅ |
 | 低 | `sol_driver`: import 解決 (複数ファイル) | ✅ |
 | 低 | `sol_cli`: `--remappings` / `--base-path` / `--include-path` / テスト | ✅ |
-| 低 | `sol_yul`: Yul パーサ (インライン assembly の完全サポート) | ❌ |
-| 低 | `sol_yul`: オプティマイザ (定数畳み込み / DCE / インライン展開) | ❌ |
-| 低 | `sol_abi`: NatSpec / メタデータ JSON | ❌ |
+| 低 | `sol_driver`/`sol_cli`: `settings.optimizer` フラグ → `YulOptimizer` 駆動 | ✅ |
+| 低 | `sol_types`: `RationalNumberType` / `FixedType` / `UFixedType` | ✅ |
+| 低 | `sol_evm`: バイトコードリンカ (library placeholder) | ✅ |
+| 低 | `sol_sema`: pure/view・可視性・override チェック / 未使用変数 / 循環 import | ✅ |
+| 低 | `sol_yul`: Yul パーサ (`YulParser`) | ✅ |
+| 低 | `sol_yul`: 複数返り値関数 (M>1) のホイスト | ✅ |
+| 低 | `sol_yul`: オプティマイザ (定数畳み込み / 代数簡約 / DCE) | ✅ |
+| 低 | `sol_abi`: NatSpec (devdoc/userdoc) / メタデータ JSON | ✅ |
+| 低 | `sol_codegen`: string・bytes (動的型) / struct / 固定長配列の複数スロット | ❌ |
+| 低 | `sol_yul`: オプティマイザのインライン展開 | ❌ |
 
 ---
 
@@ -435,15 +464,16 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 本コンパイラはそれを満たせない。理由:
 
 1. **バイトコードが solc 互換でない** — 本実装は独自の Yul 下げ・ディスパッチャ・
-   スタック割当を持ち、最適化器もないため、同じソースでも solc と異なるバイト列になる。
-2. **メタデータハッシュ未付与** — solc はバイトコード末尾に CBOR エンコードした
-   メタデータ (ipfs/bzzr ハッシュ + コンパイラバージョン) を付ける。検証はこれに依存するが
-   本実装は未生成 (`sol_abi`: メタデータ JSON が ❌)。
-3. **standard-json の入出力が部分的** — 検証 API は standard-json 互換の
-   入力/出力 (bytecode, deployedBytecode, sourceMap, metadata) を要求するが、
-   sourceMap・metadata 等が未実装。
+   スタック割当を持つため、同じソースでも solc と異なるバイト列になる
+   (`YulOptimizer` は追加したが solc の最適化パイプラインとは別物)。
+2. **メタデータ JSON は生成するが CBOR ハッシュは未付与** — `MetadataGenerator` が
+   solc 互換の metadata JSON (compiler/language/output[abi/devdoc/userdoc]/settings/
+   sources+keccak256) を生成するようになった。ただし solc のように CBOR エンコードして
+   バイトコード末尾へ埋め込む処理は未実装 (`metadata.bytecodeHash: none`)。
+3. **standard-json 出力は abi/ir/bytecode/devdoc/userdoc/metadata まで対応** —
+   残るは sourceMap (デバッグ情報) と、デプロイ済みバイトコードの厳密一致。
 
 → 「自前で出した bytecode と deployedBytecode が再現可能か」という意味での
    self-consistency は満たす（決定的に同じ出力を生成する）が、**第三者の検証
-   サービスと突き合わせる検証は不可**。対応には (a) メタデータ CBOR 生成、
+   サービスと突き合わせる検証は不可**。対応には (a) メタデータ CBOR のバイトコード埋め込み、
    (b) sourceMap 生成、(c) solc 互換の最適化・コード配置、が最低限必要。
