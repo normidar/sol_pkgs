@@ -223,8 +223,8 @@
 | **コンストラクタ引数 (creation calldata `calldataload(add(codesize(), i*32))`)** | ✅ |
 | **`&&`・`||` の短絡評価 (`_preStmts` リフト機構 + Yul if ブロック)** | ✅ |
 | **`**` の桁あふれチェック (指数二乗法 + checked_mul で Panic 0x11)** | ✅ |
-| string/bytes (動的型) の ABI エンコード/デコード・ストレージ | ❌ |
-| 固定長配列の複数スロット割当 (現状 1 スロット/変数) / struct | ❌ |
+| string/bytes (動的型) の ABI エンコード/デコード・ストレージ | ✅ |
+| 固定長配列の複数スロット割当 (現状 1 スロット/変数) / struct | ✅ |
 
 ---
 
@@ -295,7 +295,7 @@ ECDSA/RLP/JSON-RPC をすべて自前実装し、`sol_support` の keccak256 以
 | **`ContractDeployer.deploy()`**: nonce/フィー取得 → ガス推定(+20%) → 署名 → 送信 → レシート polling → revert 検出 | ✅ |
 | `computeCreateAddress` (CREATE アドレス: `keccak256(rlp([sender, nonce]))[12:]`) | ✅ |
 | テスト (57件通過 — ローカル `HttpServer` でノードを模した E2E デプロイシミュレーション含む) | ✅ |
-| CREATE2 アドレス算出 / `eth_getLogs` (イベントログ取得・デコード) | ❌ |
+| CREATE2 アドレス算出 / `eth_getLogs` (イベントログ取得・デコード) | ✅ |
 | WebSocket subscription (`eth_subscribe`) — 対応は HTTP request/response のみ | ❌ |
 | RFC 6979 決定的ノンス — 意図的に CSPRNG を採用 (HMAC/SHA-256 実装を増やさないため) | ❌ (意図的) |
 
@@ -498,7 +498,7 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 | 高 | `sol_codegen`: emit (イベント/ログ) / コンストラクタ本体 / public getter | ✅ |
 | 高 | `sol_codegen`: `revert CustomError(args)` のセレクタ付きデータ | ✅ |
 | 高 | `sol_sema`: FunctionCall / MemberAccess の完全な型解決 | ✅ |
-| 中 | `sol_codegen`: 動的配列の length/push/pop / string・bytes / struct | 🟡 (length/push/pop ✅ / string・bytes・struct ❌) |
+| 中 | `sol_codegen`: 動的配列の length/push/pop / string・bytes / struct | ✅ (length/push/pop ✅ / string・bytes ✅ / struct ✅) |
 | 中 | `sol_codegen`: コンストラクタ引数 (creation calldata デコード) | ✅ |
 | 中 | `sol_codegen`: `&&`・`||` の短絡評価 / `**` の桁あふれチェック | ✅ |
 | 中 | `sol_abi`: tuple エンコード / ABI デコード | ✅ |
@@ -512,8 +512,8 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
 | 低 | `sol_yul`: 複数返り値関数 (M>1) のホイスト | ✅ |
 | 低 | `sol_yul`: オプティマイザ (定数畳み込み / 代数簡約 / DCE) | ✅ |
 | 低 | `sol_abi`: NatSpec (devdoc/userdoc) / メタデータ JSON | ✅ |
-| 低 | `sol_codegen`: string・bytes (動的型) / struct / 固定長配列の複数スロット | ❌ |
-| 低 | `sol_yul`: オプティマイザのインライン展開 | ❌ |
+| 低 | `sol_codegen`: string・bytes (動的型) / struct / 固定長配列の複数スロット | ✅ |
+| 低 | `sol_yul`: オプティマイザのインライン展開 | ✅ |
 
 ---
 

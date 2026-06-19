@@ -157,7 +157,7 @@ class CompilerStack {
     try {
       var yulObj = IRGenerator(_diagnostics).generateContract(contract);
       if (optimize) {
-        yulObj = const YulOptimizer().optimize(yulObj);
+        yulObj = YulOptimizer().optimize(yulObj);
       }
       final yulIr = YulPrinter().print(yulObj);
       final bytecode = YulCodeGenerator().generate(yulObj);

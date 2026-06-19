@@ -45,6 +45,27 @@ EthAddress computeCreateAddress(EthAddress sender, BigInt nonce) {
   return EthAddress(keccak256(encoded).sublist(12));
 }
 
+/// Derives the address a `CREATE2` deployment will receive.
+///
+/// The formula is: `keccak256(0xff ++ sender ++ salt ++ keccak256(initCode))[12:]`
+///
+/// [salt] must be exactly 32 bytes.  [initCode] is the full creation bytecode
+/// (the same bytes you would send as transaction data for a normal deploy).
+EthAddress computeCreate2Address(
+  EthAddress sender,
+  Uint8List salt,
+  Uint8List initCode,
+) {
+  assert(salt.length == 32, 'CREATE2 salt must be exactly 32 bytes');
+  final initCodeHash = keccak256(initCode);
+  final payload = Uint8List(1 + 20 + 32 + 32);
+  payload[0] = 0xff;
+  payload.setRange(1, 21, sender.bytes);
+  payload.setRange(21, 53, salt);
+  payload.setRange(53, 85, initCodeHash);
+  return EthAddress(keccak256(payload).sublist(12));
+}
+
 /// Orchestrates a contract deployment: fetches nonce and fee data, estimates
 /// gas, builds and signs the transaction, broadcasts it, and polls for the
 /// receipt.

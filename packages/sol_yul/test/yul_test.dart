@@ -407,7 +407,7 @@ void main() {
   group('YulOptimizer — constant folding', () {
     // Fold inside an `sstore` so the value is "used" and survives DCE.
     String opt(String src) => YulPrinter().print(
-      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+      YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
     );
 
     test('folds nested arithmetic', () {
@@ -444,7 +444,7 @@ void main() {
 
   group('YulOptimizer — algebraic simplification', () {
     String opt(String src) => YulPrinter().print(
-      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+      YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
     );
 
     test('add(x, 0) -> x', () {
@@ -477,7 +477,7 @@ void main() {
 
   group('YulOptimizer — dead-code elimination', () {
     String opt(String src) => YulPrinter().print(
-      const YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+      YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
     );
 
     test('drops an unused side-effect-free binding', () {
@@ -518,7 +518,7 @@ void main() {
         }
       ''').parse()
               as YulObject;
-      final optimised = const YulOptimizer().optimize(obj);
+      final optimised = YulOptimizer().optimize(obj);
       final bytes = YulCodeGenerator().generate(optimised);
       expect(bytes, isNotEmpty);
       // The dead `junk` binding is gone, so PUSH1 99 (0x63) should not appear.

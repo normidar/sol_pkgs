@@ -8,6 +8,102 @@ import 'codec.dart';
 import 'eth_address.dart';
 import 'json_rpc_client.dart';
 
+// ── Log / event types ─────────────────────────────────────────────────────────
+
+/// A filter used to select event logs from `eth_getLogs`.
+///
+/// All fields are optional; omitting them returns all logs.
+class LogFilter {
+  const LogFilter({
+    this.address,
+    this.topics,
+    this.fromBlock = 'latest',
+    this.toBlock = 'latest',
+    this.blockHash,
+  });
+
+  /// Contract address to filter by (or null to include all contracts).
+  final EthAddress? address;
+
+  /// Topic filters: each element is a topic hash (or null to match any value
+  /// in that position).  Topics are AND-ed; within a list OR-ed.
+  final List<String?>? topics;
+
+  final String fromBlock;
+  final String toBlock;
+
+  /// Mutually exclusive with [fromBlock]/[toBlock].
+  final String? blockHash;
+
+  Map<String, Object?> toJson() => {
+    if (address != null) 'address': address!.toHex(),
+    if (topics != null) 'topics': topics,
+    if (blockHash != null) 'blockHash': blockHash,
+    if (blockHash == null) 'fromBlock': fromBlock,
+    if (blockHash == null) 'toBlock': toBlock,
+  };
+}
+
+/// A single event log entry as returned by `eth_getLogs` or
+/// `eth_getTransactionReceipt`.
+class EventLog {
+  EventLog({
+    required this.address,
+    required this.topics,
+    required this.data,
+    required this.blockNumber,
+    required this.transactionHash,
+    required this.transactionIndex,
+    required this.blockHash,
+    required this.logIndex,
+    required this.removed,
+  });
+
+  factory EventLog.fromJson(Map<String, dynamic> json) {
+    final topicsList = (json['topics'] as List).cast<String>();
+    final dataHex = json['data'] as String? ?? '0x';
+    final data = dataHex.length > 2
+        ? hexToBytes(dataHex.substring(2))
+        : Uint8List(0);
+    return EventLog(
+      address: EthAddress.fromHex(json['address'] as String),
+      topics: topicsList,
+      data: data,
+      blockNumber: bigIntFromHex(json['blockNumber'] as String),
+      transactionHash: json['transactionHash'] as String,
+      transactionIndex: bigIntFromHex(
+        json['transactionIndex'] as String,
+      ).toInt(),
+      blockHash: json['blockHash'] as String,
+      logIndex: bigIntFromHex(json['logIndex'] as String).toInt(),
+      removed: json['removed'] as bool? ?? false,
+    );
+  }
+
+  /// The address of the contract that emitted this log.
+  final EthAddress address;
+
+  /// The topics (topic[0] = event signature hash for non-anonymous events).
+  final List<String> topics;
+
+  /// The ABI-encoded non-indexed event data.
+  final Uint8List data;
+
+  final BigInt blockNumber;
+  final String transactionHash;
+  final int transactionIndex;
+  final String blockHash;
+  final int logIndex;
+
+  /// `true` when the log was emitted in a block that was later orphaned.
+  final bool removed;
+
+  @override
+  String toString() =>
+      'EventLog(address: $address, topics: $topics, '
+      'block: $blockNumber, txIndex: $transactionIndex)';
+}
+
 /// A transaction receipt as returned by `eth_getTransactionReceipt`.
 class TransactionReceipt {
   TransactionReceipt({
@@ -115,6 +211,17 @@ class EthereumClient {
     ]);
     if (result == null) return null;
     return TransactionReceipt.fromJson(result as Map<String, dynamic>);
+  }
+
+  /// Returns all event logs matching [filter].
+  ///
+  /// Calls `eth_getLogs` and decodes each entry into an [EventLog].
+  Future<List<EventLog>> getLogs(LogFilter filter) async {
+    final result = await _rpc.call('eth_getLogs', [filter.toJson()]);
+    final list = result as List;
+    return list
+        .map((e) => EventLog.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 
   /// Closes the underlying HTTP connection.

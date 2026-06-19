@@ -20,6 +20,7 @@ enum SymbolKind {
   struct,
   enum$,
   contract,
+  userDefinedValueType,
 }
 
 /// Lexical scope chain.

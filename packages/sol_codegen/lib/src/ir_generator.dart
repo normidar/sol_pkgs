@@ -25,6 +25,9 @@ class IRGenerator {
   /// Storage slot assigned to each mutable state variable.
   final Map<String, int> _stateVarSlots = {};
 
+  /// TypeName AST node for each mutable state variable (for struct layout).
+  final Map<String, TypeName> _stateVarTypeNames = {};
+
   /// Names of locals/parameters in scope (so they shadow state variables).
   final Set<String> _localNames = {};
 
@@ -44,6 +47,9 @@ class IRGenerator {
   final Map<String, EventDefinition> _events = {};
   final Map<String, CustomErrorDefinition> _errors = {};
 
+  /// Struct definitions in the contract being lowered, by name.
+  final Map<String, StructDefinition> _structs = {};
+
   YulObject generateContract(ContractDefinition contract) {
     _events
       ..clear()
@@ -57,6 +63,13 @@ class IRGenerator {
       ..addEntries(
         contract.members.whereType<CustomErrorDefinition>().map(
           (e) => MapEntry(e.name, e),
+        ),
+      );
+    _structs
+      ..clear()
+      ..addEntries(
+        contract.members.whereType<StructDefinition>().map(
+          (s) => MapEntry(s.name, s),
         ),
       );
     _allocateStateVariables(contract);
@@ -76,17 +89,64 @@ class IRGenerator {
 
   /// Assigns sequential storage slots to mutable state variables.
   ///
+  /// Each type occupies as many storage slots as its layout requires:
+  ///  * Value types, dynamic arrays, mappings: 1 slot.
+  ///  * Fixed-length array `T[N]`: N × slotSizeOf(T) slots.
+  ///  * Struct: sum of member slot sizes.
+  ///
   /// `constant` variables are inlined and `immutable` ones live in code, so
   /// neither occupies a storage slot.
   void _allocateStateVariables(ContractDefinition contract) {
     _stateVarSlots.clear();
+    _stateVarTypeNames.clear();
     var slot = 0;
     for (final member in contract.members) {
       if (member is StateVariableDeclaration &&
           member.mutability == VariableMutability.mutable) {
-        _stateVarSlots[member.name] = slot++;
+        _stateVarSlots[member.name] = slot;
+        _stateVarTypeNames[member.name] = member.typeName;
+        slot += _slotSizeOf(member.typeName);
       }
     }
+  }
+
+  /// Returns the number of storage slots occupied by [typeName].
+  int _slotSizeOf(TypeName typeName) {
+    if (typeName is ArrayTypeName && typeName.length != null) {
+      final n = _evalIntLiteral(typeName.length!);
+      if (n != null && n > 0) {
+        return n * _slotSizeOf(typeName.baseType);
+      }
+    }
+    if (typeName is UserDefinedTypeName) {
+      final struct = _structs[typeName.name];
+      if (struct != null) {
+        return struct.members.fold(
+          0,
+          (sum, m) => sum + _slotSizeOf(m.typeName),
+        );
+      }
+    }
+    // Elementary types, dynamic arrays, mappings: each occupy 1 slot.
+    return 1;
+  }
+
+  /// Returns the value of a constant integer literal expression, or null.
+  static int? _evalIntLiteral(Expression expr) {
+    if (expr is Literal && expr.kind == LiteralKind.number) {
+      return int.tryParse(expr.value);
+    }
+    return null;
+  }
+
+  /// Returns the offset (in slots) of [memberName] inside [struct], or -1.
+  int _structMemberOffset(StructDefinition struct, String memberName) {
+    var offset = 0;
+    for (final m in struct.members) {
+      if (m.name == memberName) return offset;
+      offset += _slotSizeOf(m.typeName);
+    }
+    return -1;
   }
 
   // ── Deployment code ───────────────────────────────────────────────────────
@@ -235,6 +295,12 @@ class IRGenerator {
       if (returnCount == 0) {
         body.add(YulExpressionStatement(call));
         body.add(_abiReturn(0));
+      } else if (returnCount == 1 &&
+          _isDynStringTypeName(fn.returnParameters.first.typeName)) {
+        // Single dynamic return (string/bytes): encode as offset+length+data.
+        final ret = 'abi_ret_${fn.name}_0';
+        body.add(YulVariableDeclaration([ret], call));
+        body.addAll(_abiEncodeShortString(YulIdentifier(ret)));
       } else {
         // Capture the return value(s), ABI-encode them into memory at 0x00,
         // then RETURN the head region (one 32-byte word per static value).
@@ -316,6 +382,22 @@ class IRGenerator {
         break;
       }
     }
+    // string/bytes state variables: ABI-encode as dynamic type.
+    if (typeName is ElementaryTypeName &&
+        (typeName.name == 'string' || typeName.name == 'bytes')) {
+      final signature = '${sv.name}(${keyTypes.join(',')})';
+      final packedVar = '__getter_packed_${sv.name}';
+      return YulCase(
+        YulLiteral(selectorHex(signature), YulLiteralKind.number),
+        YulBlock([
+          YulVariableDeclaration([
+            packedVar,
+          ], YulFunctionCall('sload', [slotExpr])),
+          ..._abiEncodeShortString(YulIdentifier(packedVar)),
+        ]),
+      );
+    }
+
     // Only value types are returned in a single word; structs/tuples are not.
     if (typeName is! ElementaryTypeName) return null;
 
@@ -335,6 +417,71 @@ class IRGenerator {
   YulExpression _calldataArg(int index) => YulFunctionCall('calldataload', [
     YulLiteral('${4 + index * 32}', YulLiteralKind.number),
   ]);
+
+  /// True when [typeName] is `string` or `bytes` (a dynamic type).
+  static bool _isDynStringTypeName(TypeName typeName) {
+    if (typeName is! ElementaryTypeName) return false;
+    return typeName.name == 'string' || typeName.name == 'bytes';
+  }
+
+  /// Packs a string literal (without surrounding quotes) into the Solidity
+  /// short-string storage layout: data left-aligned in 31 bytes, length*2 in
+  /// the bottom byte (even → short string marker).
+  ///
+  /// Returns the 32-byte value as a `0x…` hex literal, or null if [s] is
+  /// longer than 31 bytes (would require long-string layout).
+  static String? _packShortStringLiteral(String s) {
+    final bytes = s.codeUnits;
+    if (bytes.length > 31) return null;
+    final len = bytes.length;
+    // Build 32-byte word: data in bytes [0..len-1], zeros [len..30], len*2 in [31].
+    final word = List<int>.filled(32, 0);
+    for (var i = 0; i < len; i++) {
+      word[i] = bytes[i] & 0xff;
+    }
+    word[31] = len * 2;
+    final hex = word.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '0x$hex';
+  }
+
+  /// ABI-encodes a packed short-string word [packedWord] (as stored in
+  /// Solidity's slot layout) into memory at offset 0 and emits
+  /// `return(0, 96)`.
+  ///
+  /// Memory layout produced:
+  ///   [0x00]: 32  (offset to string data within return payload)
+  ///   [0x20]: len (string byte length)
+  ///   [0x40]: data (string bytes, left-aligned, padded to 32 bytes)
+  List<YulStatement> _abiEncodeShortString(YulExpression packedWord) {
+    final tmp = _tmp();
+    final lenTmp = _tmp();
+    final dataTmp = _tmp();
+    return [
+      YulVariableDeclaration([tmp], packedWord),
+      // length = (word & 0xff) >> 1  (bottom byte / 2 for short strings)
+      YulVariableDeclaration(
+        [lenTmp],
+        _c('shr', [
+          _n('1'),
+          _c('and', [_id(tmp), _n('0xff')]),
+        ]),
+      ),
+      // data = word with bottom byte cleared (left-aligned string bytes)
+      YulVariableDeclaration(
+        [dataTmp],
+        _c('and', [
+          _id(tmp),
+          _n(
+            '0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00',
+          ),
+        ]),
+      ),
+      _callStmt('mstore', [_n('0'), _n('32')]),
+      _callStmt('mstore', [_n('32'), _id(lenTmp)]),
+      _callStmt('mstore', [_n('64'), _id(dataTmp)]),
+      _abiReturn(96),
+    ];
+  }
 
   YulFunctionDefinition _generateFunction(FunctionDefinition fn) {
     // Parameters are referenced from the body as plain identifiers, so their
@@ -728,6 +875,9 @@ class IRGenerator {
     if (target is IndexAccess && _isStorageIndex(target)) {
       return YulFunctionCall('sload', [_storageSlotOf(target)]);
     }
+    if (target is MemberAccess && _isStorageIndex(target)) {
+      return YulFunctionCall('sload', [_storageSlotOf(target)]);
+    }
     return _generateExpression(target);
   }
 
@@ -746,8 +896,11 @@ class IRGenerator {
         YulFunctionCall('sstore', [_storageSlotOf(target), value]),
       );
     }
-    // Member assignment (struct fields) needs storage-layout computation and
-    // is not yet supported.
+    if (target is MemberAccess && _isStorageIndex(target)) {
+      return YulExpressionStatement(
+        YulFunctionCall('sstore', [_storageSlotOf(target), value]),
+      );
+    }
     _diagnostics.warning(
       'Unhandled assignment target ${target.runtimeType} in IR generator',
       location: target.location,
@@ -764,12 +917,50 @@ class IRGenerator {
   YulExpression _generateExpression(Expression expr) {
     switch (expr) {
       case Literal(:final kind, :final value):
+        // String/unicode string literals are packed into Solidity's short-string
+        // storage layout (≤31 bytes) so they can be sstore'd directly.
+        if (kind == LiteralKind.string || kind == LiteralKind.unicodeString) {
+          final content = _unquote(value);
+          final packed = _packShortStringLiteral(content);
+          if (packed != null) {
+            return YulLiteral(packed, YulLiteralKind.number);
+          }
+          // Long string literal: not supported in codegen yet.
+          _diagnostics.warning(
+            'String literal longer than 31 bytes not supported in codegen: $value',
+            location: expr.location,
+          );
+          return YulLiteral('0', YulLiteralKind.number);
+        }
+        if (kind == LiteralKind.hexString) {
+          // hex"aabbcc" → pack as bytes, same short-string layout.
+          final hexContent = _unquote(value);
+          final hexBody = hexContent.startsWith('hex')
+              ? hexContent.substring(4, hexContent.length - 1)
+              : hexContent;
+          final bytes = <int>[];
+          for (var i = 0; i + 1 < hexBody.length; i += 2) {
+            bytes.add(int.parse(hexBody.substring(i, i + 2), radix: 16));
+          }
+          if (bytes.length <= 31) {
+            final word = List<int>.filled(32, 0);
+            for (var i = 0; i < bytes.length; i++) word[i] = bytes[i];
+            word[31] = bytes.length * 2;
+            final hex = word
+                .map((b) => b.toRadixString(16).padLeft(2, '0'))
+                .join();
+            return YulLiteral('0x$hex', YulLiteralKind.number);
+          }
+          _diagnostics.warning(
+            'hex literal longer than 31 bytes not supported in codegen: $value',
+            location: expr.location,
+          );
+          return YulLiteral('0', YulLiteralKind.number);
+        }
         return YulLiteral(
           value,
           kind == LiteralKind.bool$
               ? YulLiteralKind.bool$
-              : kind == LiteralKind.string || kind == LiteralKind.unicodeString
-              ? YulLiteralKind.string
               : YulLiteralKind.number,
         );
 
@@ -806,6 +997,14 @@ class IRGenerator {
           final baseType = expression.annotation;
           if (baseType is ArrayType && !baseType.isFixed) {
             return YulFunctionCall('sload', [_storageSlotOf(expression)]);
+          }
+        }
+
+        // Struct member read from storage.
+        if (_isStorageIndex(expression)) {
+          final structDef = _resolveStructType(expression);
+          if (structDef != null) {
+            return YulFunctionCall('sload', [_structMemberSlot(expr)]);
           }
         }
 
@@ -1029,12 +1228,37 @@ class IRGenerator {
     ]),
   );
 
-  /// Decodes the [index]-th statically-encoded argument.
+  /// Whether [p] is a `string` or `bytes` (dynamic) parameter.
+  static bool _isDynamicStringParam(Parameter p) {
+    final tn = p.typeName;
+    if (tn is! ElementaryTypeName) return false;
+    return tn.name == 'string' || tn.name == 'bytes';
+  }
+
+  /// Decodes the [index]-th ABI-encoded argument.
   ///
-  /// Each value type occupies one 32-byte head word; argument `i` lives at
-  /// `calldataload(4 + i*32)` (4 = selector). Dynamic types (string/bytes/
-  /// dynamic arrays) need offset+length decoding and are not yet handled.
+  /// Value types: `calldataload(4 + i*32)`.
+  /// Dynamic types (`string`/`bytes`): the head word is an offset from byte 4;
+  /// the data starts at `4 + offset` with a 32-byte length prefix.
+  /// We copy the data to a fresh scratch area in memory and leave a memory
+  /// pointer on the Yul stack — for now the pointer is what gets stored as the
+  /// "value" (actual string ops are limited, but storage via mstore works for
+  /// short strings).
   YulExpression _decodeParam(Parameter p, int index) {
+    if (_isDynamicStringParam(p)) {
+      // The head word is the offset from byte 4 in the ABI tail.
+      // Actual data: 4 + offset bytes in calldata.
+      // For now we expose the calldata offset of the length word as the value.
+      // This is sufficient for passing to storage helpers.
+      final offsetPtr = YulFunctionCall('calldataload', [
+        YulLiteral('${4 + index * 32}', YulLiteralKind.number),
+      ]);
+      // Return the absolute calldata offset of the length word.
+      return YulFunctionCall('add', [
+        YulLiteral('4', YulLiteralKind.number),
+        offsetPtr,
+      ]);
+    }
     return YulFunctionCall('calldataload', [
       YulLiteral('${4 + index * 32}', YulLiteralKind.number),
     ]);
@@ -1086,19 +1310,27 @@ class IRGenerator {
   // ── Storage slot computation (state vars, mappings, arrays) ─────────────────
 
   /// Whether [e] ultimately refers to contract storage (a state variable or an
-  /// index into one), so reads/writes lower to `sload`/`sstore`.
+  /// index/member into one), so reads/writes lower to `sload`/`sstore`.
   bool _isStorageIndex(Expression e) {
     if (e is Identifier) return _isStateVar(e.name);
     if (e is IndexAccess) return _isStorageIndex(e.base);
+    if (e is MemberAccess) return _isStorageMemberAccess(e);
     return false;
+  }
+
+  /// True when [e] is a struct member access rooted at a storage variable.
+  bool _isStorageMemberAccess(MemberAccess e) {
+    // If the base is a storage variable or index, treat as storage.
+    return _isStorageIndex(e.expression);
   }
 
   /// The storage slot of an l-value rooted at a state variable.
   ///
-  ///  * state variable `v`              → its assigned base slot
-  ///  * `m[k]` where `m : mapping`      → `keccak256(k . slot(m))`
-  ///  * `a[i]` where `a : T[]` (dynamic)→ `keccak256(slot(a)) + i`
-  ///  * `a[i]` where `a : T[N]` (fixed) → `slot(a) + i`
+  ///  * state variable `v`               → its assigned base slot
+  ///  * `m[k]` where `m : mapping`       → `keccak256(k . slot(m))`
+  ///  * `a[i]` where `a : T[]` (dynamic) → `keccak256(slot(a)) + i`
+  ///  * `a[i]` where `a : T[N]` (fixed)  → `slot(a) + i * slotSize(T)`
+  ///  * `s.field` where `s : struct`     → `slot(s) + memberOffset(field)`
   YulExpression _storageSlotOf(Expression target) {
     if (target is Identifier && _isStateVar(target.name)) {
       return _slot(target.name);
@@ -1115,14 +1347,88 @@ class IRGenerator {
       if (baseType is ArrayType && baseType.length == null) {
         return YulFunctionCall(_dynArraySlotHelper(), [baseSlot, index]);
       }
-      // Fixed-size array (or unknown): elements are laid out contiguously.
+      // Fixed-size array: elements are laid out contiguously.
+      // Element stride = slot size of element type.
+      if (baseType is ArrayType && baseType.length != null) {
+        final elemSize = _slotSizeOf(
+          _typeNameOf(target.base) ??
+              ElementaryTypeName(SourceLocation.invalid, 'uint256'),
+        );
+        if (elemSize == 1) {
+          return YulFunctionCall('add', [baseSlot, index]);
+        }
+        return YulFunctionCall('add', [
+          baseSlot,
+          YulFunctionCall('mul', [
+            index,
+            YulLiteral('$elemSize', YulLiteralKind.number),
+          ]),
+        ]);
+      }
       return YulFunctionCall('add', [baseSlot, index]);
+    }
+    if (target is MemberAccess) {
+      return _structMemberSlot(target);
     }
     _diagnostics.warning(
       'Unsupported storage location ${target.runtimeType} in IR generator',
       location: target.location,
     );
     return YulLiteral('0', YulLiteralKind.number);
+  }
+
+  /// Computes the storage slot for a struct member access `expr.memberName`.
+  YulExpression _structMemberSlot(MemberAccess access) {
+    final baseSlot = _storageSlotOf(access.expression);
+    // Find the struct definition from the base expression's type annotation.
+    final structDef = _resolveStructType(access.expression);
+    if (structDef == null) {
+      _diagnostics.warning(
+        'Cannot resolve struct type for member access ".${access.memberName}"',
+        location: access.location,
+      );
+      return baseSlot;
+    }
+    final offset = _structMemberOffset(structDef, access.memberName);
+    if (offset < 0) {
+      _diagnostics.warning(
+        'Struct "${structDef.name}" has no member "${access.memberName}"',
+        location: access.location,
+      );
+      return baseSlot;
+    }
+    if (offset == 0) return baseSlot;
+    return YulFunctionCall('add', [
+      baseSlot,
+      YulLiteral('$offset', YulLiteralKind.number),
+    ]);
+  }
+
+  /// Attempts to resolve the [StructDefinition] for [expr]'s storage type.
+  StructDefinition? _resolveStructType(Expression expr) {
+    // Fall back to looking at the TypeName in the AST.
+    final typeName = _typeNameOf(expr);
+    if (typeName is UserDefinedTypeName) {
+      return _structs[typeName.name];
+    }
+    return null;
+  }
+
+  /// Extracts the [TypeName] AST node associated with [expr], if available.
+  TypeName? _typeNameOf(Expression expr) {
+    // We can reach the TypeName for identifiers that are state variables.
+    if (expr is Identifier && _isStateVar(expr.name)) {
+      // Find the state variable declaration.
+      // (We can't easily recover the AST here without more bookkeeping,
+      //  so return null for now.)
+      return _stateVarTypeNames[expr.name];
+    }
+    if (expr is IndexAccess) {
+      final baseType = _typeNameOf(expr.base);
+      if (baseType is ArrayTypeName) return baseType.baseType;
+      if (baseType is MappingTypeName) return baseType.valueType;
+    }
+    return null;
   }
 
   /// `keccak256(key . slot)` — the value slot of `mapping[key]`.

@@ -1190,33 +1190,40 @@ class Parser {
     _expect(TokenKind.RParen);
     var vis = Visibility.internal;
     var mut = StateMutability.nonpayable;
+    loop:
     while (true) {
       switch (_cur.kind) {
         case TokenKind.kPublic:
           vis = Visibility.public;
           _advance();
+          continue loop;
         case TokenKind.kExternal:
           vis = Visibility.external;
           _advance();
+          continue loop;
         case TokenKind.kInternal:
           vis = Visibility.internal;
           _advance();
+          continue loop;
         case TokenKind.kPrivate:
           vis = Visibility.private;
           _advance();
+          continue loop;
         case TokenKind.kPure:
           mut = StateMutability.pure;
           _advance();
+          continue loop;
         case TokenKind.kView:
           mut = StateMutability.view;
           _advance();
+          continue loop;
         case TokenKind.kPayable:
           mut = StateMutability.payable;
           _advance();
+          continue loop;
         default:
-          break;
+          break loop;
       }
-      break;
     }
     var returnParams = <Parameter>[];
     if (_tryConsume(TokenKind.kReturns)) {
@@ -1368,7 +1375,5 @@ class Parser {
     return i < tokens.length ? tokens[i].kind : TokenKind.Eof;
   }
 }
-
-// ── Internal error class for structured error recovery ────────────────────────
 
 class _ParseError implements Exception {}

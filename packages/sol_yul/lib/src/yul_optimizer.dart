@@ -13,17 +13,29 @@ import 'yul_ast.dart';
 ///    terminator (`return`, `revert`, `stop`, `leave`, `break`, `continue`)
 ///    and drops `let` bindings whose variables are never read or assigned (the
 ///    initializer is kept as an expression statement when it has side effects).
+///  * **Function inlining** — expands small, non-recursive functions called in
+///    statement context (`let ret := fn(args)` or `fn(args)`) directly at the
+///    call site.  A function is eligible when its body has at most
+///    [inlineThreshold] statements (counted recursively) and it does not call
+///    itself directly or indirectly.
 ///
 /// The optimiser is purely AST→AST and never changes observable behaviour.
 class YulOptimizer {
-  const YulOptimizer({this.maxPasses = 10});
+  YulOptimizer({this.maxPasses = 10, this.inlineThreshold = 12});
 
   /// Upper bound on fixed-point iterations (a safety net; convergence is
   /// usually reached in 1–2 passes).
   final int maxPasses;
 
+  /// Maximum (inclusive) number of statements a function body may contain for
+  /// it to be considered eligible for inlining.
+  final int inlineThreshold;
+
   static final BigInt _mask = (BigInt.one << 256) - BigInt.one;
   static final BigInt _signBit = BigInt.one << 255;
+
+  /// Counter used to generate unique variable names for inlined copies.
+  int _inlineCounter = 0;
 
   YulObject optimize(YulObject obj) => YulObject(
     obj.name,
@@ -40,11 +52,353 @@ class YulOptimizer {
   YulBlock _fixBlock(YulBlock block) {
     var current = block;
     for (var i = 0; i < maxPasses; i++) {
-      final next = _eliminateDead(_block(current));
+      final inlined = _inlineBlock(current);
+      final next = _eliminateDead(_block(inlined));
       if (_printEq(next, current)) return next;
       current = next;
     }
     return current;
+  }
+
+  // ── Function inlining ─────────────────────────────────────────────────────
+
+  /// Collects all [YulFunctionDefinition]s that appear as direct children of
+  /// [block].
+  Map<String, YulFunctionDefinition> _collectDefs(YulBlock block) {
+    final defs = <String, YulFunctionDefinition>{};
+    for (final s in block.statements) {
+      if (s is YulFunctionDefinition) defs[s.name] = s;
+    }
+    return defs;
+  }
+
+  /// Whether [fn] is eligible for inlining:
+  ///  * body is small enough
+  ///  * does not call itself (direct recursion check)
+  bool _canInline(YulFunctionDefinition fn) {
+    if (_countStmts(fn.body) > inlineThreshold) return false;
+    return !_callsItself(fn.body, fn.name);
+  }
+
+  /// Counts statements recursively inside [block].
+  int _countStmts(YulBlock block) {
+    var n = 0;
+    for (final s in block.statements) {
+      n++;
+      if (s is YulBlock) n += _countStmts(s);
+      if (s is YulIf) n += _countStmts(s.body);
+      if (s is YulForLoop) {
+        n += _countStmts(s.pre) + _countStmts(s.post) + _countStmts(s.body);
+      }
+      if (s is YulSwitch) {
+        for (final c in s.cases) {
+          n += _countStmts(c.body);
+        }
+        if (s.defaultCase != null) n += _countStmts(s.defaultCase!);
+      }
+      if (s is YulFunctionDefinition) n += _countStmts(s.body);
+    }
+    return n;
+  }
+
+  /// Returns true if [block] contains a direct call to [name].
+  bool _callsItself(YulBlock block, String name) {
+    return _exprCallsItself(YulBlock(block.statements), name);
+  }
+
+  bool _exprCallsItself(YulNode node, String name) {
+    switch (node) {
+      case YulFunctionCall(name: final callName, :final arguments):
+        if (callName == name) return true;
+        return arguments.any((a) => _exprCallsItself(a, name));
+      case YulBlock(:final statements):
+        return statements.any((s) => _exprCallsItself(s, name));
+      case YulVariableDeclaration(:final value):
+        return value != null && _exprCallsItself(value, name);
+      case YulAssignment(:final value):
+        return _exprCallsItself(value, name);
+      case YulExpressionStatement(:final expression):
+        return _exprCallsItself(expression, name);
+      case YulIf(:final condition, :final body):
+        return _exprCallsItself(condition, name) ||
+            _exprCallsItself(body, name);
+      case YulForLoop(:final pre, :final condition, :final post, :final body):
+        return _exprCallsItself(pre, name) ||
+            _exprCallsItself(condition, name) ||
+            _exprCallsItself(post, name) ||
+            _exprCallsItself(body, name);
+      case YulSwitch(:final expression, :final cases, :final defaultCase):
+        return _exprCallsItself(expression, name) ||
+            cases.any((c) => _exprCallsItself(c.body, name)) ||
+            (defaultCase != null && _exprCallsItself(defaultCase, name));
+      case YulFunctionDefinition(:final body):
+        return _exprCallsItself(body, name);
+      default:
+        return false;
+    }
+  }
+
+  /// Runs the inlining pass over [block]: replaces eligible calls in statement
+  /// context with their expanded bodies.
+  YulBlock _inlineBlock(YulBlock block) {
+    final defs = _collectDefs(block);
+    final eligible = <String, YulFunctionDefinition>{};
+    for (final entry in defs.entries) {
+      if (_canInline(entry.value)) eligible[entry.key] = entry.value;
+    }
+    if (eligible.isEmpty) return block;
+
+    final out = <YulStatement>[];
+    for (final s in block.statements) {
+      out.addAll(_inlineStatement(s, eligible));
+    }
+    return YulBlock(out);
+  }
+
+  /// Tries to expand [stmt] if it is a direct call to an inlineable function.
+  /// May return multiple statements (the expanded body). Recurses into nested
+  /// blocks.
+  List<YulStatement> _inlineStatement(
+    YulStatement stmt,
+    Map<String, YulFunctionDefinition> eligible,
+  ) {
+    switch (stmt) {
+      // ── let vars := fn(args) ──
+      case YulVariableDeclaration(:final variables, :final value)
+          when value is YulFunctionCall && eligible.containsKey(value.name):
+        final fn = eligible[value.name]!;
+        final expanded = _expandCall(fn, value.arguments);
+        if (expanded == null) break;
+        final (preStmts, retVarNames) = expanded;
+        // Assign the inlined return variable(s) to `variables`.
+        if (variables.length == retVarNames.length) {
+          final out = <YulStatement>[...preStmts];
+          for (var i = 0; i < variables.length; i++) {
+            out.add(
+              YulVariableDeclaration([
+                variables[i],
+              ], YulIdentifier(retVarNames[i])),
+            );
+          }
+          return out;
+        }
+        break;
+
+      // ── fn(args) as a bare expression statement ──
+      case YulExpressionStatement(
+            expression: YulFunctionCall(:final name, :final arguments),
+          )
+          when eligible.containsKey(name):
+        final fn = eligible[name]!;
+        final expanded = _expandCall(fn, arguments);
+        if (expanded != null) {
+          final (preStmts, _) = expanded;
+          return preStmts;
+        }
+        break;
+
+      // ── Recurse into nested blocks ──
+      case YulBlock():
+        return [_inlineBlock(stmt)];
+      case YulIf(:final condition, :final body):
+        return [YulIf(condition, _inlineBlock(body))];
+      case YulForLoop(:final pre, :final condition, :final post, :final body):
+        return [
+          YulForLoop(
+            _inlineBlock(pre),
+            condition,
+            _inlineBlock(post),
+            _inlineBlock(body),
+          ),
+        ];
+      case YulSwitch(:final expression, :final cases, :final defaultCase):
+        return [
+          YulSwitch(
+            expression,
+            cases.map((c) => YulCase(c.value, _inlineBlock(c.body))).toList(),
+            defaultCase == null ? null : _inlineBlock(defaultCase),
+          ),
+        ];
+      case YulFunctionDefinition(
+        :final name,
+        :final parameters,
+        :final returnVariables,
+        :final body,
+      ):
+        return [
+          YulFunctionDefinition(
+            name,
+            parameters,
+            returnVariables,
+            _inlineBlock(body),
+          ),
+        ];
+      default:
+        break;
+    }
+    return [stmt];
+  }
+
+  /// Expands a call to [fn] with [args]:
+  ///   1. Declares fresh locals for each parameter, initialised from [args].
+  ///   2. Declares fresh locals for each return variable, initialised to 0.
+  ///   3. Wraps the body in `for {} 1 {} { <body> break }` so that `leave`
+  ///      (renamed to `break`) exits the inlined scope, not the outer function.
+  ///
+  /// Returns `([pre-statements], [fresh-return-var-names])` or `null` when the
+  /// call cannot be safely expanded (e.g. wrong argument count).
+  (List<YulStatement>, List<String>)? _expandCall(
+    YulFunctionDefinition fn,
+    List<YulExpression> args,
+  ) {
+    if (args.length != fn.parameters.length) return null;
+
+    final id = _inlineCounter++;
+    final rename = <String, String>{};
+
+    // Map each parameter name to a fresh local.
+    for (final p in fn.parameters) {
+      rename[p] = '_il${id}_$p';
+    }
+    // Map each return variable to a fresh local.
+    for (final r in fn.returnVariables) {
+      rename[r] = '_il${id}_$r';
+    }
+
+    final stmts = <YulStatement>[];
+
+    // Declare parameter locals.
+    for (var i = 0; i < fn.parameters.length; i++) {
+      stmts.add(YulVariableDeclaration([rename[fn.parameters[i]]!], args[i]));
+    }
+
+    // Declare return locals (default zero).
+    for (final r in fn.returnVariables) {
+      stmts.add(
+        YulVariableDeclaration([
+          rename[r]!,
+        ], YulLiteral('0', YulLiteralKind.number)),
+      );
+    }
+
+    // Build the inlined body (rename + replace leave→break).
+    final inlinedBody = _substituteBlock(fn.body, rename, leaveToBreak: true);
+
+    // Wrap in for {} 1 {} { <body>; break } so that leave (now break) exits.
+    stmts.add(
+      YulForLoop(
+        YulBlock(const []),
+        YulLiteral('1', YulLiteralKind.number),
+        YulBlock(const []),
+        YulBlock([...inlinedBody.statements, YulBreak()]),
+      ),
+    );
+
+    final retNames = fn.returnVariables.map((r) => rename[r]!).toList();
+    return (stmts, retNames);
+  }
+
+  // ── Variable substitution ─────────────────────────────────────────────────
+
+  YulBlock _substituteBlock(
+    YulBlock block,
+    Map<String, String> rename, {
+    bool leaveToBreak = false,
+  }) {
+    return YulBlock(
+      block.statements
+          .map((s) => _substituteStmt(s, rename, leaveToBreak: leaveToBreak))
+          .toList(),
+    );
+  }
+
+  YulStatement _substituteStmt(
+    YulStatement s,
+    Map<String, String> rename, {
+    bool leaveToBreak = false,
+  }) {
+    switch (s) {
+      case YulLeave() when leaveToBreak:
+        return YulBreak();
+      case YulVariableDeclaration(:final variables, :final value):
+        return YulVariableDeclaration(
+          variables.map((v) => rename[v] ?? v).toList(),
+          value == null ? null : _substituteExpr(value, rename),
+        );
+      case YulAssignment(:final variables, :final value):
+        return YulAssignment(
+          variables.map((v) => rename[v] ?? v).toList(),
+          _substituteExpr(value, rename),
+        );
+      case YulExpressionStatement(:final expression):
+        return YulExpressionStatement(_substituteExpr(expression, rename));
+      case YulBlock():
+        return _substituteBlock(s, rename, leaveToBreak: leaveToBreak);
+      case YulIf(:final condition, :final body):
+        return YulIf(
+          _substituteExpr(condition, rename),
+          _substituteBlock(body, rename, leaveToBreak: leaveToBreak),
+        );
+      case YulForLoop(:final pre, :final condition, :final post, :final body):
+        // Note: `leave` inside a for loop means "leave the function", so we
+        // continue substituting it to break; `break`/`continue` remain as-is.
+        return YulForLoop(
+          _substituteBlock(pre, rename, leaveToBreak: leaveToBreak),
+          _substituteExpr(condition, rename),
+          _substituteBlock(post, rename, leaveToBreak: leaveToBreak),
+          _substituteBlock(body, rename, leaveToBreak: leaveToBreak),
+        );
+      case YulSwitch(:final expression, :final cases, :final defaultCase):
+        return YulSwitch(
+          _substituteExpr(expression, rename),
+          cases
+              .map(
+                (c) => YulCase(
+                  c.value,
+                  _substituteBlock(c.body, rename, leaveToBreak: leaveToBreak),
+                ),
+              )
+              .toList(),
+          defaultCase == null
+              ? null
+              : _substituteBlock(
+                  defaultCase,
+                  rename,
+                  leaveToBreak: leaveToBreak,
+                ),
+        );
+      // Inner function definitions: do NOT substitute leave→break inside them
+      // (leave exits their own function, not the inlined one).
+      case YulFunctionDefinition(
+        :final name,
+        :final parameters,
+        :final returnVariables,
+        :final body,
+      ):
+        return YulFunctionDefinition(
+          name,
+          parameters,
+          returnVariables,
+          _substituteBlock(body, rename, leaveToBreak: false),
+        );
+      default:
+        return s;
+    }
+  }
+
+  YulExpression _substituteExpr(YulExpression e, Map<String, String> rename) {
+    switch (e) {
+      case YulIdentifier(:final name):
+        final newName = rename[name];
+        return newName == null ? e : YulIdentifier(newName);
+      case YulFunctionCall(:final name, :final arguments):
+        return YulFunctionCall(
+          name,
+          arguments.map((a) => _substituteExpr(a, rename)).toList(),
+        );
+      default:
+        return e; // YulLiteral — no substitution needed
+    }
   }
 
   // ── Statement / block transformation (fold + simplify) ──────────────────────
