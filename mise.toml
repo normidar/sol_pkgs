@@ -2,7 +2,7 @@
 dart = "3.12.2"
 
 [env]
-_.path = ["{{env.USERPROFILE | default(value=env.HOME | default(value=''))}}/.pub-cache/bin"]
+_.path = ["{{env.USERPROFILE | default(value='')}}/.pub-cache/bin", "{{env.HOME | default(value='')}}/.pub-cache/bin"]
 
 [tasks.setup]
 description = "Install melos globally via dart pub"
