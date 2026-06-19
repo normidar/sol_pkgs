@@ -59,12 +59,9 @@ const int256Type = IntType(256, signed: true);
 /// (0–80). The bare `fixed` / `ufixed` aliases mean `fixed128x18` /
 /// `ufixed128x18`.
 class FixedType extends SolType {
-  const FixedType(
-    this.bits,
-    this.fractionalDigits, {
-    this.signed = true,
-  }) : assert(bits >= 8 && bits <= 256 && bits % 8 == 0),
-       assert(fractionalDigits >= 0 && fractionalDigits <= 80);
+  const FixedType(this.bits, this.fractionalDigits, {this.signed = true})
+    : assert(bits >= 8 && bits <= 256 && bits % 8 == 0),
+      assert(fractionalDigits >= 0 && fractionalDigits <= 80);
 
   final int bits;
   final int fractionalDigits;
@@ -106,7 +103,9 @@ class RationalNumberType extends SolType {
       denominator = _reduceDen(numerator, denominator);
 
   /// Builds an integer-valued rational (denominator 1).
-  RationalNumberType.integer(BigInt value) : numerator = value, denominator = BigInt.one;
+  RationalNumberType.integer(BigInt value)
+    : numerator = value,
+      denominator = BigInt.one;
 
   final BigInt numerator;
   final BigInt denominator;

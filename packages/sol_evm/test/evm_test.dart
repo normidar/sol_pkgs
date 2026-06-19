@@ -65,12 +65,17 @@ void main() {
 
     test('links placeholder to a 20-byte address', () {
       final ph = BytecodeLinker.placeholderFor(name);
-      final unlinked = '6080$ph''00';
+      final unlinked =
+          '6080$ph'
+          '00';
       final linked = linker.link(unlinked, {
         name: '0x1234567890123456789012345678901234567890',
       });
-      expect(linked, '60801234567890123456789012345678901234567890'
-          '00');
+      expect(
+        linked,
+        '60801234567890123456789012345678901234567890'
+        '00',
+      );
       expect(linker.isLinked(linked), isTrue);
     });
 
