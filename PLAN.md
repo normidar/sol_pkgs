@@ -274,6 +274,46 @@
 
 ---
 
+### `sol_web3` ✅ 完成度: 中〜高 (NEW — フルパイプラインの「最後の1マイル」)
+
+`sol_driver` が生成するバイトコードを実際のチェーンに乗せるための、純Dart製
+Ethereum JSON-RPC クライアント・トランザクション署名・デプロイ機能。secp256k1/
+ECDSA/RLP/JSON-RPC をすべて自前実装し、`sol_support` の keccak256 以外の追加依存
+なし（solc/web3.js/Node.js 不要）。
+
+| 機能 | 状態 |
+|---|---|
+| `codec.dart`: hex/bytes/BigInt 相互変換 (JSON-RPC quantity encoding 含む) | ✅ |
+| **secp256k1 楕円曲線演算** (`ECPoint`: 加算・倍加・スカラー倍, アフィン座標) | ✅ |
+| **ECDSA 署名** (`signEcdsa`: CSPRNG ノンス, low-s 正規化 EIP-2 準拠) | ✅ |
+| **公開鍵/アドレスリカバリ** (`recoverPublicKey`/`recoverEthAddress`: `p≡3 mod 4` 平方根トリック) | ✅ |
+| `EthPrivateKey` (鍵範囲検証・アドレス導出) / `EthAddress` (EIP-55 チェックサム) | ✅ |
+| **RLP エンコード/デコード** (`rlpEncode`/`rlpDecode`/`rlpUint`, 短/長 string・list 全パターン) | ✅ |
+| **`EthereumTransaction`**: legacy (EIP-155 リプレイ防止) + EIP-1559 (動的フィー) 署名/エンコード | ✅ |
+| `JsonRpcClient` (`dart:io HttpClient` ベース JSON-RPC 2.0、`package:http` 不使用) | ✅ |
+| `EthereumClient`: `eth_chainId`/`getTransactionCount`/`gasPrice`/`maxPriorityFeePerGas`/`estimateGas`/`sendRawTransaction`/`getTransactionReceipt` 等の型付きラッパー | ✅ |
+| **`ContractDeployer.deploy()`**: nonce/フィー取得 → ガス推定(+20%) → 署名 → 送信 → レシート polling → revert 検出 | ✅ |
+| `computeCreateAddress` (CREATE アドレス: `keccak256(rlp([sender, nonce]))[12:]`) | ✅ |
+| テスト (57件通過 — ローカル `HttpServer` でノードを模した E2E デプロイシミュレーション含む) | ✅ |
+| CREATE2 アドレス算出 / `eth_getLogs` (イベントログ取得・デコード) | ❌ |
+| WebSocket subscription (`eth_subscribe`) — 対応は HTTP request/response のみ | ❌ |
+| RFC 6979 決定的ノンス — 意図的に CSPRNG を採用 (HMAC/SHA-256 実装を増やさないため) | ❌ (意図的) |
+
+> **重要な注意点**:
+> 1. secp256k1/ECDSA は `sol_pkgs` 全体の方針通り「タイミング攻撃に対する
+>    定数時間性を考慮しない、検証目的のリファレンス実装」。本番資産を扱う鍵管理には
+>    audited なライブラリ (libsecp256k1 等) を使うべき。
+> 2. 実チェーン（テストネット/メインネット）への実送信は本サンドボックスでは未検証
+>    — ネットワークアクセスや資金提供済みアカウントがないため。`test/deploy_loopback_test.dart`
+>    でローカル `HttpServer` を実ノード代わりに立て、署名・RLP・JSON-RPC往復・nonce/ガス取得・
+>    レシート polling・CREATE アドレス算出までを一通り検証しているが、これは実ノードとの
+>    互換性を保証するものではない。
+> 3. B-34 (下記) の通り、楕円曲線の field prime 定数を手書き16進数リテラルで持つことの
+>    危険性が実証された。`secp256k1P` は閉形式の式 (`2^256 - 2^32 - 977`) で定義し、
+>    今後同種の定数を追加する場合も可能な限り閉形式 or 外部検証可能な形を優先すること。
+
+---
+
 ## 解決済みバグ
 
 | # | 場所 | 内容 | 修正日 |
@@ -358,6 +398,25 @@
 > 終端後のホイスト関数定義まで除去して「Invalid jump destination 0」を誘発したため、関数定義
 > (とそれを含む文) は到達不能でも保持するよう修正済み。テスト総数 187 → 263 件。
 
+## 解決済みバグ（B-34〜B-35: sol_web3 実装中に発見）
+
+| # | 場所 | 内容 | 修正日 |
+|---|---|---|---|
+| B-34 | `sol_web3/lib/src/crypto/secp256k1.dart` | `secp256k1P`（楕円曲線の field prime）の手書き16進数リテラルが2桁欠落（64桁中62桁）→ 素数ではない誤った法で楕円曲線演算が実行され、生成元 `G` 自身が曲線方程式を満たさず、ランダム鍵では `BigInt.modInverse` が断続的に `Not coprime` 例外を投げる/誤ったアドレスを導出する。閉形式の式 `2^256 - 2^32 - 977` に置換して修正 — 20,000件のランダムスカラーによる曲線所属ブルートフォース検証、および Node.js `crypto.createECDH('secp256k1')` による公開鍵の独立クロスチェックの両方で正しさを確認 | 2026-06-19 |
+| B-35 | `sol_web3/test/transaction_test.dart` | EIP-155 `v` 検証テストが同じハッシュを2回（`key.sign(hash)` と `tx.sign(key)`）独立に署名し、両者の `recoveryId` が一致することを期待 → 署名はランダムノンス（RFC 6979 不使用）のため約50%の確率で `recoveryId` が異なり間欠的に失敗（`melos test` で実際に再現: `Expected: 62709, Actual: 62710`）。`tx.sign(key)` 側の実際の署名から `recoveryId` を逆算し、それで `recoverEthAddress` がキーのアドレスに一致することを検証する形に変更（二重署名を排除）→ 25回連続実行で再現せず | 2026-06-19 |
+
+> B-34 は手で書いた暗号定数を目視レビューだけで信用してはならないことを直接示した例。
+> 64桁の16進数リテラルから2文字欠落しても読んだだけでは気づけないが、結果は「動くことも
+> あるが時々壊れる」という最悪のクラスの不正確さ（鍵によって発覚するかどうかが変わる）
+> になる。`secp256k1P` は自己検証可能な閉形式の式で表現し、今後同種の定数を追加する場合も
+> 可能な限り閉形式または外部ツールでクロスチェック可能な形を優先すること。同セッションでは
+> 副次的に、テストフィクスチャ内の Hardhat 秘密鍵（末尾1桁欠落）と受信者アドレス
+> （末尾1バイト欠落）という2件の独立した転記ミスも同じ検証プロセス中に発見・修正した。
+> B-35 はバグの種類が異なる: ライブラリのコードは最初から正しく、`melos test` を
+> 一度実行しただけでは気づけない間欠的なテストの誤りだった。「テストが通った」を
+> 1回のグリーンランで判断せず、ランダム性に依存するテストは複数回実行して安定性を
+> 確認すべきという教訓。
+
 ## 残存バグ（未修正）
 
 なし（既知のバグはすべて修正済み。未実装機能は各パッケージ表の ❌ を参照）。
@@ -380,7 +439,8 @@
 | sol_yul | 45 | ✅ 全通過 |
 | sol_driver | 58 | ✅ 全通過 (うち多数は最小EVMでの実行検証) |
 | sol_cli | 7 | ✅ 全通過 |
-| **合計** | **263** | **✅ 全通過** |
+| sol_web3 | 57 | ✅ 全通過 (ローカル HttpServer での E2E デプロイ検証含む) |
+| **合計** | **320** | **✅ 全通過** |
 
 ---
 

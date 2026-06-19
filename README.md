@@ -19,9 +19,15 @@ sol_cli          (CLI front-end)
                ├── sol_lexer   (tokeniser)
                └── sol_ast
                      └── sol_support  (SourceLocation, diagnostics, remapping)
+
+sol_web3         (Ethereum signing/RPC/deployment — consumes sol_driver's bytecode)
+   └── sol_support  (keccak256)
 ```
 
 All arrows read "depends on".  `sol_support` is the universal foundation.
+`sol_web3` is the deployment "last mile": it takes the bytecode that
+`sol_driver` compiles and gets it onto an actual EVM chain, with no
+dependency on solc, web3.js, or Node.js.
 
 ## Packages
 
@@ -39,6 +45,7 @@ All arrows read "depends on".  `sol_support` is the universal foundation.
 | [`sol_abi`](packages/sol_abi) | ABI JSON, metadata JSON, NatSpec |
 | [`sol_driver`](packages/sol_driver) | Compiler orchestration, standard-JSON |
 | [`sol_cli`](packages/sol_cli) | `solc` command-line interface |
+| [`sol_web3`](packages/sol_web3) | Pure-Dart signing, JSON-RPC client, contract deployment |
 
 ## Recommended Build Order
 
@@ -47,6 +54,7 @@ sol_support → sol_lexer → sol_ast → sol_parser   (parse milestone)
            └→ sol_evm → sol_yul                   (Yul → bytecode milestone)
 sol_types → sol_sema → sol_codegen                (Solidity front-end)
 sol_abi → sol_driver → sol_cli                    (output + CLI)
+sol_support → sol_web3                            (sign + deploy, pure Dart)
 ```
 
 ## Prerequisites
@@ -88,6 +96,28 @@ contract Adder {
 
 ```sh
 dart run sol_cli:solc --bin Adder.sol
+```
+
+## Full Pipeline: Compile → Sign → Deploy (Pure Dart, No Node.js)
+
+`sol_driver` compiles Solidity to EVM bytecode; `sol_web3` takes that
+bytecode the rest of the way to a live chain — signing the transaction
+(secp256k1/ECDSA), talking JSON-RPC, and polling for the receipt — without
+shelling out to `solc`, `web3.js`, or any Node.js tooling. See
+[`packages/sol_web3/example/full_pipeline_example.dart`](packages/sol_web3/example/full_pipeline_example.dart)
+for a runnable end-to-end example against any JSON-RPC endpoint
+(e.g. a local Anvil/Hardhat node).
+
+```dart
+final stack = CompilerStack()..addSource('Adder.sol', source);
+final bytecode = stack.compile().contracts['Adder']!.bytecode;
+
+final client = EthereumClient(Uri.parse('http://127.0.0.1:8545'));
+final result = await ContractDeployer(client).deploy(
+  credentials: EthPrivateKey.fromHex(privateKeyHex),
+  bytecode: bytecode,
+);
+print('deployed at ${result.contractAddress.toChecksumHex()}');
 ```
 
 ## License
