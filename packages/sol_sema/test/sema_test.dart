@@ -346,7 +346,7 @@ void main() {
   // ── TypeChecker ──────────────────────────────────────────────────────────
 
   group('TypeChecker', () {
-    SolType _check(Expression expr) {
+    SolType check(Expression expr) {
       final diags = _newDiags();
       final fn = _fn('f', body: _block([ReturnStatement(_loc(), expr)]));
       final file = _sourceFile([
@@ -360,46 +360,46 @@ void main() {
     }
 
     test('number literal → uint256', () {
-      expect(_check(_lit('42')), isA<IntType>());
+      expect(check(_lit('42')), isA<IntType>());
     });
 
     test('bool literal → bool', () {
       final expr = Literal(_loc(), LiteralKind.bool$, 'true', null);
-      expect(_check(expr), equals(boolType));
+      expect(check(expr), equals(boolType));
     });
 
     test('string literal → string', () {
       final expr = Literal(_loc(), LiteralKind.string, 'hello', null);
-      expect(_check(expr), isA<StringType>());
+      expect(check(expr), isA<StringType>());
     });
 
     test('binary op uint256 + uint256 → uint256', () {
       final expr = BinaryOperation(_loc(), '+', _lit('1'), _lit('2'));
-      final t = _check(expr);
+      final t = check(expr);
       expect(t, isA<IntType>());
     });
 
     test('comparison returns bool', () {
       final expr = BinaryOperation(_loc(), '<', _lit('1'), _lit('2'));
-      expect(_check(expr), equals(boolType));
+      expect(check(expr), equals(boolType));
     });
 
     test('logical && returns bool', () {
       final l = Literal(_loc(), LiteralKind.bool$, 'true', null);
       final r = Literal(_loc(), LiteralKind.bool$, 'false', null);
       final expr = BinaryOperation(_loc(), '&&', l, r);
-      expect(_check(expr), equals(boolType));
+      expect(check(expr), equals(boolType));
     });
 
     test('unary ! returns bool', () {
       final inner = Literal(_loc(), LiteralKind.bool$, 'true', null);
       final expr = UnaryOperation(_loc(), '!', inner, true);
-      expect(_check(expr), equals(boolType));
+      expect(check(expr), equals(boolType));
     });
 
     test('unary - preserves type', () {
       final expr = UnaryOperation(_loc(), '-', _lit('1'), true);
-      final t = _check(expr);
+      final t = check(expr);
       expect(t, isA<IntType>());
     });
 

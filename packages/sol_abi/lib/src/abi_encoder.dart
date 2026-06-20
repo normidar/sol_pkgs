@@ -23,8 +23,12 @@ class AbiEncoder {
     }
 
     final builder = BytesBuilder();
-    for (final h in heads) builder.add(h);
-    for (final t in tails) builder.add(t);
+    for (final h in heads) {
+      builder.add(h);
+    }
+    for (final t in tails) {
+      builder.add(t);
+    }
     return builder.toBytes();
   }
 
@@ -113,8 +117,9 @@ class AbiEncoder {
     if (value is BigInt) return value;
     if (value is int) return BigInt.from(value);
     if (value is String) {
-      if (value.startsWith('0x'))
+      if (value.startsWith('0x')) {
         return BigInt.parse(value.substring(2), radix: 16);
+      }
       return BigInt.parse(value);
     }
     return BigInt.zero;

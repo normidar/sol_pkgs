@@ -124,7 +124,9 @@ class MiniEvm {
           final len = pop().toInt();
           final bytes = [for (var i = 0; i < len; i++) memByte(off + i)];
           var h = BigInt.zero;
-          for (final b in keccak256(bytes)) h = (h << 8) | BigInt.from(b);
+          for (final b in keccak256(bytes)) {
+            h = (h << 8) | BigInt.from(b);
+          }
           push(h);
           pc++;
         case 0x10:
@@ -236,7 +238,9 @@ class MiniEvm {
           final len = pop().toInt();
           final topics = [for (var i = 0; i < op - 0xa0; i++) pop()];
           final data = Uint8List(len);
-          for (var i = 0; i < len; i++) data[i] = memByte(off + i);
+          for (var i = 0; i < len; i++) {
+            data[i] = memByte(off + i);
+          }
           logs.add((topics: topics, data: data));
           pc++;
         case 0x56:
@@ -254,7 +258,9 @@ class MiniEvm {
           final off = pop().toInt();
           final len = pop().toInt();
           final out = Uint8List(len);
-          for (var i = 0; i < len; i++) out[i] = memByte(off + i);
+          for (var i = 0; i < len; i++) {
+            out[i] = memByte(off + i);
+          }
           return out;
         case 0xfd:
           return null; // REVERT
@@ -1130,6 +1136,64 @@ contract K {
       ''');
       expect(evm.storage[BigInt.from(0)], BigInt.from(100));
       expect(evm.storage[BigInt.from(1)], BigInt.from(200));
+    });
+  });
+
+  group('struct & fixed-array storage layout', () {
+    test('struct fields occupy distinct slots', () {
+      final evm = _deploy('''
+pragma solidity ^0.8.0;
+contract C {
+  struct Point { uint256 x; uint256 y; }
+  Point p;
+  function set(uint256 a, uint256 b) public { p.x = a; p.y = b; }
+  function getX() public view returns (uint256) { return p.x; }
+  function getY() public view returns (uint256) { return p.y; }
+}
+''', 'C');
+      evm.call(_calldata('set(uint256,uint256)', [11, 22]));
+      expect(_asUint(evm.call(_calldata('getX()', []))), BigInt.from(11));
+      expect(_asUint(evm.call(_calldata('getY()', []))), BigInt.from(22));
+    });
+
+    test('fixed array elements occupy distinct slots', () {
+      final evm = _deploy('''
+pragma solidity ^0.8.0;
+contract C {
+  uint256[3] a;
+  function set(uint256 i, uint256 v) public { a[i] = v; }
+  function get(uint256 i) public view returns (uint256) { return a[i]; }
+}
+''', 'C');
+      evm.call(_calldata('set(uint256,uint256)', [0, 100]));
+      evm.call(_calldata('set(uint256,uint256)', [1, 200]));
+      evm.call(_calldata('set(uint256,uint256)', [2, 300]));
+      expect(
+        _asUint(evm.call(_calldata('get(uint256)', [0]))),
+        BigInt.from(100),
+      );
+      expect(
+        _asUint(evm.call(_calldata('get(uint256)', [1]))),
+        BigInt.from(200),
+      );
+      expect(
+        _asUint(evm.call(_calldata('get(uint256)', [2]))),
+        BigInt.from(300),
+      );
+    });
+
+    test('struct literal assignment p = Point(a,b)', () {
+      final evm = _deploy('''
+pragma solidity ^0.8.0;
+contract C {
+  struct Point { uint256 x; uint256 y; }
+  Point p;
+  function set(uint256 a, uint256 b) public { p = Point(a, b); }
+  function sum() public view returns (uint256) { return p.x + p.y; }
+}
+''', 'C');
+      evm.call(_calldata('set(uint256,uint256)', [11, 22]));
+      expect(_asUint(evm.call(_calldata('sum()', []))), BigInt.from(33));
     });
   });
 }

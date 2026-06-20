@@ -44,7 +44,9 @@ class Lexer {
 
     // ── Whitespace ────────────────────────────────────────────────────────
     if (_isWs(ch)) {
-      while (_pos < source.length && _isWs(_cu(_pos))) _pos++;
+      while (_pos < source.length && _isWs(_cu(_pos))) {
+        _pos++;
+      }
       return _tok(TokenKind.Whitespace, start, _pos - start);
     }
 
@@ -54,13 +56,17 @@ class Lexer {
       // NatSpec line  ///
       if (next == 0x2F && _peek(2) == 0x2F) {
         _pos += 3;
-        while (_pos < source.length && _cu(_pos) != 0x0A) _pos++;
+        while (_pos < source.length && _cu(_pos) != 0x0A) {
+          _pos++;
+        }
         return _tokLex(TokenKind.NatSpecLine, start);
       }
       // Line comment //
       if (next == 0x2F) {
         _pos += 2;
-        while (_pos < source.length && _cu(_pos) != 0x0A) _pos++;
+        while (_pos < source.length && _cu(_pos) != 0x0A) {
+          _pos++;
+        }
         return _tok(TokenKind.Comment, start, _pos - start);
       }
       // NatSpec block  /**
@@ -116,11 +122,15 @@ class Lexer {
     // ── Hex number  0x… ───────────────────────────────────────────────────
     if (ch == 0x30 && _peek(1) == 0x78) {
       _pos += 2;
-      while (_pos < source.length && _isHexDigit(_cu(_pos))) _pos++;
+      while (_pos < source.length && _isHexDigit(_cu(_pos))) {
+        _pos++;
+      }
       // optional underscores (0x1_000)
       while (_pos < source.length && _cu(_pos) == 0x5F) {
         _pos++;
-        while (_pos < source.length && _isHexDigit(_cu(_pos))) _pos++;
+        while (_pos < source.length && _isHexDigit(_cu(_pos))) {
+          _pos++;
+        }
       }
       return _tokLex(TokenKind.NumberLiteral, start);
     }
@@ -149,7 +159,9 @@ class Lexer {
 
     // ── Identifiers & keywords ────────────────────────────────────────────
     if (_isIdentStart(ch)) {
-      while (_pos < source.length && _isIdentCont(_cu(_pos))) _pos++;
+      while (_pos < source.length && _isIdentCont(_cu(_pos))) {
+        _pos++;
+      }
       final text = source.substring(start, _pos);
       final kind = keywordOrIdentifier(text);
       int width = 0;

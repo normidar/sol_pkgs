@@ -9,37 +9,59 @@ abstract class AstVisitor {
   // ── Declarations ──────────────────────────────────────────────────────────
 
   void visitSourceFile(SourceFile node) {
-    for (final p in node.pragmas) p.accept(this);
-    for (final i in node.imports) i.accept(this);
-    for (final c in node.declarations) c.accept(this);
+    for (final p in node.pragmas) {
+      p.accept(this);
+    }
+    for (final i in node.imports) {
+      i.accept(this);
+    }
+    for (final c in node.declarations) {
+      c.accept(this);
+    }
   }
 
   void visitPragmaDirective(PragmaDirective node) {}
   void visitImportDirective(ImportDirective node) {}
 
   void visitContractDefinition(ContractDefinition node) {
-    for (final b in node.baseContracts) b.accept(this);
-    for (final m in node.members) m.accept(this);
+    for (final b in node.baseContracts) {
+      b.accept(this);
+    }
+    for (final m in node.members) {
+      m.accept(this);
+    }
   }
 
   void visitInheritanceSpecifier(InheritanceSpecifier node) {
-    for (final a in node.arguments) a.accept(this);
+    for (final a in node.arguments) {
+      a.accept(this);
+    }
   }
 
   void visitFunctionDefinition(FunctionDefinition node) {
-    for (final p in node.parameters) p.accept(this);
-    for (final r in node.returnParameters) r.accept(this);
-    for (final m in node.modifiers) m.accept(this);
+    for (final p in node.parameters) {
+      p.accept(this);
+    }
+    for (final r in node.returnParameters) {
+      r.accept(this);
+    }
+    for (final m in node.modifiers) {
+      m.accept(this);
+    }
     node.body?.accept(this);
   }
 
   void visitModifierDefinition(ModifierDefinition node) {
-    for (final p in node.parameters) p.accept(this);
+    for (final p in node.parameters) {
+      p.accept(this);
+    }
     node.body.accept(this);
   }
 
   void visitModifierInvocation(ModifierInvocation node) {
-    for (final a in node.arguments) a.accept(this);
+    for (final a in node.arguments) {
+      a.accept(this);
+    }
   }
 
   void visitStateVariableDeclaration(StateVariableDeclaration node) {
@@ -48,15 +70,21 @@ abstract class AstVisitor {
   }
 
   void visitEventDefinition(EventDefinition node) {
-    for (final p in node.parameters) p.accept(this);
+    for (final p in node.parameters) {
+      p.accept(this);
+    }
   }
 
   void visitCustomErrorDefinition(CustomErrorDefinition node) {
-    for (final p in node.parameters) p.accept(this);
+    for (final p in node.parameters) {
+      p.accept(this);
+    }
   }
 
   void visitStructDefinition(StructDefinition node) {
-    for (final m in node.members) m.accept(this);
+    for (final m in node.members) {
+      m.accept(this);
+    }
   }
 
   void visitEnumDefinition(EnumDefinition node) {}
@@ -88,8 +116,12 @@ abstract class AstVisitor {
   void visitUserDefinedTypeName(UserDefinedTypeName node) {}
 
   void visitFunctionTypeName(FunctionTypeName node) {
-    for (final p in node.parameters) p.accept(this);
-    for (final r in node.returnParameters) r.accept(this);
+    for (final p in node.parameters) {
+      p.accept(this);
+    }
+    for (final r in node.returnParameters) {
+      r.accept(this);
+    }
   }
 
   void visitParameter(Parameter node) {
@@ -103,7 +135,9 @@ abstract class AstVisitor {
   // ── Statements ────────────────────────────────────────────────────────────
 
   void visitBlock(Block node) {
-    for (final s in node.statements) s.accept(this);
+    for (final s in node.statements) {
+      s.accept(this);
+    }
   }
 
   void visitIfStatement(IfStatement node) {
@@ -141,7 +175,9 @@ abstract class AstVisitor {
   }
 
   void visitVariableDeclarationStatement(VariableDeclarationStatement node) {
-    for (final d in node.declarations) d?.accept(this);
+    for (final d in node.declarations) {
+      d?.accept(this);
+    }
     node.initialValue?.accept(this);
   }
 
@@ -161,11 +197,15 @@ abstract class AstVisitor {
 
   void visitTryStatement(TryStatement node) {
     node.externalCall.accept(this);
-    for (final c in node.clauses) c.accept(this);
+    for (final c in node.clauses) {
+      c.accept(this);
+    }
   }
 
   void visitCatchClause(CatchClause node) {
-    for (final p in node.parameters) p.accept(this);
+    for (final p in node.parameters) {
+      p.accept(this);
+    }
     node.body.accept(this);
   }
 
@@ -191,12 +231,16 @@ abstract class AstVisitor {
 
   void visitFunctionCall(FunctionCall node) {
     node.expression.accept(this);
-    for (final a in node.arguments) a.accept(this);
+    for (final a in node.arguments) {
+      a.accept(this);
+    }
   }
 
   void visitFunctionCallOptions(FunctionCallOptions node) {
     node.expression.accept(this);
-    for (final v in node.options.values) v.accept(this);
+    for (final v in node.options.values) {
+      v.accept(this);
+    }
   }
 
   void visitNewExpression(NewExpression node) {
@@ -229,7 +273,9 @@ abstract class AstVisitor {
   }
 
   void visitTupleExpression(TupleExpression node) {
-    for (final c in node.components) c?.accept(this);
+    for (final c in node.components) {
+      c?.accept(this);
+    }
   }
 
   void visitDeleteExpression(DeleteExpression node) {

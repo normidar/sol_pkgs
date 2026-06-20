@@ -22,7 +22,7 @@ class Diagnostic {
 
   @override
   String toString() {
-    final code = errorCode != null ? ' [${errorCode}]' : '';
+    final code = errorCode != null ? ' [$errorCode]' : '';
     final loc = location.isValid ? ' at $location' : '';
     return '${severity.name.toUpperCase()}$code$loc: $message';
   }

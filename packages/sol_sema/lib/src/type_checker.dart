@@ -26,7 +26,9 @@ class TypeChecker extends AstVisitor {
 
   @override
   void visitContractDefinition(ContractDefinition node) {
-    for (final m in node.members) m.accept(this);
+    for (final m in node.members) {
+      m.accept(this);
+    }
   }
 
   @override
@@ -48,7 +50,9 @@ class TypeChecker extends AstVisitor {
 
   @override
   void visitBlock(Block node) {
-    for (final s in node.statements) s.accept(this);
+    for (final s in node.statements) {
+      s.accept(this);
+    }
   }
 
   @override
@@ -101,7 +105,9 @@ class TypeChecker extends AstVisitor {
   @override
   void visitTryStatement(TryStatement node) {
     node.externalCall.accept(this);
-    for (final c in node.clauses) c.accept(this);
+    for (final c in node.clauses) {
+      c.accept(this);
+    }
   }
 
   @override
@@ -230,7 +236,9 @@ class TypeChecker extends AstVisitor {
     }
 
     node.expression.accept(this);
-    for (final a in node.arguments) a.accept(this);
+    for (final a in node.arguments) {
+      a.accept(this);
+    }
 
     if (funcSym != null) {
       _setType(node, funcSym.type);
@@ -318,7 +326,9 @@ class TypeChecker extends AstVisitor {
 
   @override
   void visitTupleExpression(TupleExpression node) {
-    for (final c in node.components) c?.accept(this);
+    for (final c in node.components) {
+      c?.accept(this);
+    }
     if (node.components.length == 1 && node.components.first != null) {
       // Parenthesised expression `(e)` — propagate the inner type.
       _setType(node, _typeOf(node.components.first!));

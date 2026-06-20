@@ -148,7 +148,9 @@ class Parser {
         if (_tryConsume(TokenKind.LParen)) {
           if (!_at(TokenKind.RParen)) {
             args.add(_parseExpression());
-            while (_tryConsume(TokenKind.Comma)) args.add(_parseExpression());
+            while (_tryConsume(TokenKind.Comma)) {
+              args.add(_parseExpression());
+            }
           }
           _expect(TokenKind.RParen);
         }
@@ -311,7 +313,9 @@ class Parser {
           isOverride = true;
           if (_tryConsume(TokenKind.LParen)) {
             overrides.add(_ident());
-            while (_tryConsume(TokenKind.Comma)) overrides.add(_ident());
+            while (_tryConsume(TokenKind.Comma)) {
+              overrides.add(_ident());
+            }
             _expect(TokenKind.RParen);
           }
         case TokenKind.Identifier:
@@ -408,7 +412,9 @@ class Parser {
         _advance();
         if (_tryConsume(TokenKind.LParen)) {
           overrides.add(_ident());
-          while (_tryConsume(TokenKind.Comma)) overrides.add(_ident());
+          while (_tryConsume(TokenKind.Comma)) {
+            overrides.add(_ident());
+          }
           _expect(TokenKind.RParen);
         }
         continue;
@@ -489,10 +495,11 @@ class Parser {
     final libName = _qualifiedName();
     _expect(TokenKind.kFor);
     TypeName? forType;
-    if (!_at(TokenKind.Star))
+    if (!_at(TokenKind.Star)) {
       forType = _parseTypeName();
-    else
+    } else {
       _advance();
+    }
     _expect(TokenKind.Semicolon);
     return UsingDirective(_locFrom(start), libName, forType);
   }
@@ -538,7 +545,9 @@ class Parser {
           _advance();
           if (_tryConsume(TokenKind.LParen)) {
             _ident();
-            while (_tryConsume(TokenKind.Comma)) _ident();
+            while (_tryConsume(TokenKind.Comma)) {
+              _ident();
+            }
             _expect(TokenKind.RParen);
           }
         default:
@@ -1012,7 +1021,9 @@ class Parser {
       case TokenKind.StringLiteral:
         // Concatenated string literals: `"a" "b"` → one node.
         final buf = StringBuffer(_advance().lexeme);
-        while (_at(TokenKind.StringLiteral)) buf.write(_advance().lexeme);
+        while (_at(TokenKind.StringLiteral)) {
+          buf.write(_advance().lexeme);
+        }
         return Literal(
           _locFrom(start),
           LiteralKind.string,
@@ -1330,7 +1341,9 @@ class Parser {
   }
 
   void _synchronize(Set<TokenKind> stopAt) {
-    while (!_isEof && !stopAt.contains(_cur.kind)) _advance();
+    while (!_isEof && !stopAt.contains(_cur.kind)) {
+      _advance();
+    }
   }
 
   bool _looksLikeTypeName() {

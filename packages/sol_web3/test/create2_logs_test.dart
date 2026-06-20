@@ -104,7 +104,7 @@ void main() {
       await server.close(force: true);
     });
 
-    Future<void> _serveLogs(List<Map<String, Object?>> logs) {
+    Future<void> serveLogs(List<Map<String, Object?>> logs) {
       return server.first.then((req) async {
         final body = await utf8.decoder.bind(req).join();
         final decoded = jsonDecode(body) as Map<String, dynamic>;
@@ -117,7 +117,7 @@ void main() {
     }
 
     test('getLogs returns empty list when no logs', () async {
-      final serverFuture = _serveLogs([]);
+      final serverFuture = serveLogs([]);
       final client = EthereumClient(endpoint);
       try {
         final logs = await client.getLogs(
@@ -149,7 +149,7 @@ void main() {
         'logIndex': '0x0',
         'removed': false,
       };
-      final serverFuture = _serveLogs([logJson]);
+      final serverFuture = serveLogs([logJson]);
       final client = EthereumClient(endpoint);
       try {
         final logs = await client.getLogs(

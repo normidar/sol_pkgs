@@ -168,7 +168,9 @@ class Resolver extends AstVisitor {
   void visitBlock(Block node) {
     final saved = _scope;
     _scope = Scope(parent: _scope);
-    for (final s in node.statements) s.accept(this);
+    for (final s in node.statements) {
+      s.accept(this);
+    }
     _scope = saved;
   }
 
@@ -225,7 +227,9 @@ class Resolver extends AstVisitor {
   @override
   void visitTryStatement(TryStatement node) {
     node.externalCall.accept(this);
-    for (final c in node.clauses) c.accept(this);
+    for (final c in node.clauses) {
+      c.accept(this);
+    }
   }
 
   @override
@@ -303,7 +307,9 @@ class Resolver extends AstVisitor {
   @override
   void visitFunctionCall(FunctionCall node) {
     node.expression.accept(this);
-    for (final a in node.arguments) a.accept(this);
+    for (final a in node.arguments) {
+      a.accept(this);
+    }
   }
 
   @override

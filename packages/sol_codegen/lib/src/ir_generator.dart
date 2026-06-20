@@ -689,6 +689,17 @@ class IRGenerator {
         :final leftHandSide,
         :final rightHandSide,
       ):
+        // Whole-struct assignment `s = Struct(a, b, …)`: a struct value does
+        // not fit in one EVM word, so the single-word path below would emit a
+        // bogus `fun_Struct` call (jump-to-0 at runtime).  Expand it to one
+        // `sstore` per member instead.
+        if (operator$ == '=') {
+          final structAssign = _tryStructLiteralAssignment(
+            leftHandSide,
+            rightHandSide,
+          );
+          if (structAssign != null) return structAssign;
+        }
         var value = _generateExpression(rightHandSide);
         if (operator$ != '=') {
           // Compound assignment: x op= y  ⇒  x = x op y.
@@ -734,6 +745,66 @@ class IRGenerator {
       default:
         return YulExpressionStatement(_generateExpression(expr));
     }
+  }
+
+  /// Lowers `target = StructName(arg0, arg1, …)` into one `sstore` per struct
+  /// member, or returns null when [rhs] is not a struct-constructor call (so
+  /// the caller falls back to the generic assignment path).
+  YulStatement? _tryStructLiteralAssignment(Expression target, Expression rhs) {
+    if (rhs is! FunctionCall) return null;
+    final callee = rhs.expression;
+    if (callee is! Identifier) return null;
+    final struct = _structs[callee.name];
+    if (struct == null) return null;
+
+    if (!_isStorageIndex(target)) {
+      _diagnostics.warning(
+        'Struct literal assignment to a non-storage target is not supported',
+        location: target.location,
+      );
+      return null;
+    }
+    if (rhs.arguments.length != struct.members.length) {
+      _diagnostics.warning(
+        'Struct "${struct.name}" constructed with ${rhs.arguments.length} '
+        'argument(s) but declares ${struct.members.length} member(s)',
+        location: rhs.location,
+      );
+      return null;
+    }
+
+    final baseSlot = _storageSlotOf(target);
+    final stmts = <YulStatement>[];
+    var offset = 0;
+    for (var i = 0; i < struct.members.length; i++) {
+      final member = struct.members[i];
+      final size = _slotSizeOf(member.typeName);
+      if (size != 1) {
+        // Nested struct / array member: not representable as a single word.
+        _diagnostics.warning(
+          'Struct member "${member.name}" spans multiple slots; struct '
+          'literal assignment supports value-type members only',
+          location: rhs.location,
+        );
+        return null;
+      }
+      final slot = offset == 0
+          ? baseSlot
+          : YulFunctionCall('add', [
+              baseSlot,
+              YulLiteral('$offset', YulLiteralKind.number),
+            ]);
+      stmts.add(
+        YulExpressionStatement(
+          YulFunctionCall('sstore', [
+            slot,
+            _generateExpression(rhs.arguments[i]),
+          ]),
+        ),
+      );
+      offset += size;
+    }
+    return YulBlock(stmts);
   }
 
   static bool _isStatementBuiltin(String name) =>
@@ -944,7 +1015,9 @@ class IRGenerator {
           }
           if (bytes.length <= 31) {
             final word = List<int>.filled(32, 0);
-            for (var i = 0; i < bytes.length; i++) word[i] = bytes[i];
+            for (var i = 0; i < bytes.length; i++) {
+              word[i] = bytes[i];
+            }
             word[31] = bytes.length * 2;
             final hex = word
                 .map((b) => b.toRadixString(16).padLeft(2, '0'))
@@ -1032,6 +1105,19 @@ class IRGenerator {
               builtin,
               arguments.map(_generateExpression).toList(),
             );
+          }
+          // A struct constructor (`Struct(a, b)`) yields a multi-word value
+          // that cannot be used as a single-word expression.  Calling it
+          // `fun_Struct` would jump to a non-existent function (offset 0).
+          // Whole-struct *assignments* are handled in the statement lowerer;
+          // any other use is unsupported.
+          if (_structs.containsKey(expression.name)) {
+            _diagnostics.warning(
+              'Struct value "${expression.name}(…)" can only be assigned '
+              'directly to a storage variable, not used inline',
+              location: expr.location,
+            );
+            return YulLiteral('0', YulLiteralKind.number);
           }
           return YulFunctionCall(
             'fun_${expression.name}',
@@ -1121,12 +1207,14 @@ class IRGenerator {
         }
         return YulFunctionCall(_rawArith(op), [l, r]);
       case '/':
-        if (type != null)
+        if (type != null) {
           return YulFunctionCall(_checkedDivMod('/', type), [l, r]);
+        }
         return YulFunctionCall('div', [l, r]);
       case '%':
-        if (type != null)
+        if (type != null) {
           return YulFunctionCall(_checkedDivMod('%', type), [l, r]);
+        }
         return YulFunctionCall('mod', [l, r]);
       case '**':
         if (type != null && _checked) {
