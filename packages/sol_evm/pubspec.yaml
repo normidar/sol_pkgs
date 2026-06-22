@@ -2,7 +2,7 @@ name: sol_evm
 description: >
   EVM opcode table, assembler, bytecode linker, and gas cost model
   for the sol_pkgs Solidity compiler.
-version: 0.1.0+1
+version: 0.1.0+2
 repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_evm
 
 environment:

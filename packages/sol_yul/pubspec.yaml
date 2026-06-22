@@ -1,7 +1,7 @@
 name: sol_yul
 description: >
   Yul intermediate representation, optimiser, and EVM dialect for the sol_pkgs compiler.
-version: 0.1.0+1
+version: 0.1.1
 repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_yul
 
 environment:
@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   sol_support: ^0.1.0+1
-  sol_evm: ^0.1.0+1
+  sol_evm: ^0.1.0+2
 
 dev_dependencies:
   lints: ^4.0.0

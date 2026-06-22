@@ -1,7 +1,7 @@
 name: sol_ast
 description: >
   Solidity AST node definitions and visitor framework for the sol_pkgs compiler.
-version: 0.1.0+1
+version: 0.1.0+2
 repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_ast
 
 environment:

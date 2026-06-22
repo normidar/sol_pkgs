@@ -2,7 +2,7 @@ name: sol_sema
 description: >
   Semantic analysis for the sol_pkgs Solidity compiler.
   Name resolution, scope management, C3 inheritance linearisation, and type checking.
-version: 0.1.0+1
+version: 0.1.1
 repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_sema
 
 environment:
@@ -10,8 +10,8 @@ environment:
 
 dependencies:
   sol_support: ^0.1.0+1
-  sol_ast: ^0.1.0+1
-  sol_types: ^0.1.0+1
+  sol_ast: ^0.1.0+2
+  sol_types: ^0.1.0+2
 
 dev_dependencies:
   lints: ^4.0.0

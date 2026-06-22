@@ -1,3 +1,7 @@
+## 0.1.1
+
+ - **FEAT**: all features.
+
 ## 0.1.0+1
 
  - Initial release: pure-Dart secp256k1/ECDSA, RLP, legacy/EIP-1559

@@ -1,7 +1,7 @@
 name: sol_codegen
 description: >
   Lowers semantically-analysed Solidity AST to Yul IR for the sol_pkgs compiler.
-version: 0.1.0+1
+version: 0.1.1
 repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_codegen
 
 environment:
@@ -9,10 +9,10 @@ environment:
 
 dependencies:
   sol_support: ^0.1.0+1
-  sol_ast: ^0.1.0+1
-  sol_types: ^0.1.0+1
-  sol_yul: ^0.1.0+1
-  sol_abi: ^0.1.0+1
+  sol_ast: ^0.1.0+2
+  sol_types: ^0.1.0+2
+  sol_yul: ^0.1.1
+  sol_abi: ^0.1.0+2
 
 dev_dependencies:
   lints: ^4.0.0

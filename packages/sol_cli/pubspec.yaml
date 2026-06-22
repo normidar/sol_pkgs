@@ -1,7 +1,7 @@
 name: sol_cli
 description: >
   Command-line interface for the sol_pkgs Solidity compiler.
-version: 0.1.0+1
+version: 0.1.0+2
 repository: https://github.com/normidar/sol_pkgs/tree/main/packages/sol_cli
 
 environment:
@@ -9,7 +9,7 @@ environment:
 
 dependencies:
   sol_support: ^0.1.0+1
-  sol_driver: ^0.1.0+1
+  sol_driver: ^0.1.1
   args: ^2.5.0
 
 dev_dependencies:

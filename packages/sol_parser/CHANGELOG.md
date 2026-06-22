@@ -1,3 +1,8 @@
+## 0.1.1
+
+ - **FIX**: Implement unimplemented PLAN.md features (types, linker, Yul parser/optimizer, optimizer flag) (#3).
+ - **FEAT**: all features.
+
 ## 0.1.0+1
 
  - **FIX**: for release.
