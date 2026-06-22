@@ -39,4 +39,16 @@ class CompilationResult {
   final Map<String, ContractOutput> contracts; // contract name → output
 
   bool get success => !diagnostics.any((d) => d.isError);
+
+  /// Returns true when compilation succeeded.
+  ///
+  /// When [warningsAsErrors] is true, any warning is also treated as a failure.
+  bool isSuccess({bool warningsAsErrors = false}) {
+    if (warningsAsErrors) {
+      return !diagnostics.any(
+        (d) => d.isError || d.severity == Severity.warning,
+      );
+    }
+    return success;
+  }
 }

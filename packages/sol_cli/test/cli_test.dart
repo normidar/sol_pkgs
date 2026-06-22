@@ -277,6 +277,14 @@ void main() {
       expect(r.err, contains('No input files'));
     });
 
+    test('--warnings-as-errors flag accepted', () {
+      expect(_run(['--warnings-as-errors']).exitCode, 1);
+    });
+
+    test('--output-dir flag accepted', () {
+      expect(_run(['--output-dir', '/tmp']).exitCode, 1);
+    });
+
     test('--remappings flag accepted', () {
       expect(_run(['--remappings', 'prefix=target']).exitCode, 1);
     });
@@ -356,6 +364,26 @@ void main() {
       expect(r.exitCode, 0);
       expect(r.out, contains('Binary:'));
       expect(r.out, contains('Contract JSON ABI:'));
+    });
+
+    test('--output-dir writes .bin and .abi files', () {
+      final path = _tempSol(_counter);
+      final dir = Directory(
+        '${Directory.systemTemp.path}/sol_cli_test_outdir_'
+        '${DateTime.now().microsecondsSinceEpoch}',
+      );
+      addTearDown(() {
+        if (dir.existsSync()) dir.deleteSync(recursive: true);
+      });
+      final r = _run(['--bin', '--abi', '--output-dir', dir.path, path]);
+      expect(r.exitCode, 0);
+      expect(File('${dir.path}/Counter.bin').existsSync(), isTrue);
+      expect(File('${dir.path}/Counter.abi').existsSync(), isTrue);
+    });
+
+    test('--warnings-as-errors with no warnings exits 0', () {
+      final path = _tempSol(_counter);
+      expect(_run(['--warnings-as-errors', path]).exitCode, 0);
     });
 
     test('--optimize --bin produces valid bytecode', () {

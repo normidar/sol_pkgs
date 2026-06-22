@@ -50,6 +50,10 @@ class Assembler {
   void emit(Opcode op) => _instructions.add(SimpleInstruction(op));
 
   void push(BigInt value) {
+    if (value == BigInt.zero) {
+      _instructions.add(const SimpleInstruction(Opcode.PUSH0));
+      return;
+    }
     final bytes = _bigIntToBytes(value);
     _instructions.add(PushInstruction(bytes));
   }

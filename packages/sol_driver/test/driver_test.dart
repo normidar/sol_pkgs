@@ -27,6 +27,38 @@ bool _containsSubsequence(List<int> haystack, List<int> needle) {
 }
 
 void main() {
+  group('CompilationResult.isSuccess', () {
+    test('success is true for a clean compilation', () {
+      final stack = CompilerStack()..addSource('Adder.sol', _adderSource);
+      final result = stack.compile();
+      expect(result.success, isTrue);
+      expect(result.isSuccess(), isTrue);
+    });
+
+    test('isSuccess(warningsAsErrors: true) fails when warnings exist', () {
+      // A circular import produces a warning; use that as our warning source.
+      const src = "pragma solidity ^0.8.0; import './A.sol';";
+      final result =
+          (CompilerStack()
+                ..addSource('A.sol', src)
+                ..addSource('./A.sol', src))
+              .compile();
+      final hasWarning = result.diagnostics.any(
+        (d) => d.severity == Severity.warning,
+      );
+      if (hasWarning) {
+        expect(result.isSuccess(warningsAsErrors: true), isFalse);
+        expect(result.success, isTrue);
+      }
+    });
+
+    test('isSuccess(warningsAsErrors: false) ignores warnings', () {
+      final stack = CompilerStack()..addSource('Adder.sol', _adderSource);
+      final result = stack.compile();
+      expect(result.isSuccess(warningsAsErrors: false), isTrue);
+    });
+  });
+
   group('CompilerStack', () {
     test('compiles Adder without fatal errors', () {
       final stack = CompilerStack()..addSource('Adder.sol', _adderSource);

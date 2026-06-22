@@ -526,6 +526,35 @@ void main() {
     });
   });
 
+  group('YulCodeGenerator — deployed bytecode size limit', () {
+    test('generateDeployed succeeds for small contracts', () {
+      final obj = _obj(
+        YulBlock([YulExpressionStatement(YulFunctionCall('stop', []))]),
+      );
+      expect(() => YulCodeGenerator().generateDeployed(obj), returnsNormally);
+    });
+
+    test(
+      'generateDeployed throws ArgumentError when bytecode exceeds 24KB',
+      () {
+        // Build a Yul block with enough sstore calls to exceed 24,576 bytes.
+        // Each `sstore(slot, value)` lowers to roughly ~5–7 bytes; 4000 calls
+        // produces well over 24KB.
+        final stmts = <YulStatement>[
+          for (var i = 0; i < 4000; i++)
+            YulExpressionStatement(
+              YulFunctionCall('sstore', [_num('$i'), _num('$i')]),
+            ),
+        ];
+        final obj = _obj(YulBlock(stmts));
+        expect(
+          () => YulCodeGenerator().generateDeployed(obj),
+          throwsArgumentError,
+        );
+      },
+    );
+  });
+
   group('YulParser ↔ codegen / printer round-trip', () {
     test('parsed block compiles to bytecode', () {
       final block = YulParser('{ let x := add(1, 2) }').parseBlock();

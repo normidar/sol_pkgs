@@ -39,6 +39,19 @@ void main() {
       expect(bytes[4], Opcode.ADD.byte);
     });
 
+    test('push(BigInt.zero) emits PUSH0', () {
+      final asm = Assembler()..push(BigInt.zero);
+      final bytes = asm.assemble();
+      expect(bytes.length, 1);
+      expect(bytes[0], Opcode.PUSH0.byte);
+    });
+
+    test('push(BigInt.zero) is shorter than push(BigInt.one)', () {
+      final asmZero = Assembler()..push(BigInt.zero);
+      final asmOne = Assembler()..push(BigInt.one);
+      expect(asmZero.assemble().length, lessThan(asmOne.assemble().length));
+    });
+
     test('label/jump resolution', () {
       final asm = Assembler()
         ..jump('target')

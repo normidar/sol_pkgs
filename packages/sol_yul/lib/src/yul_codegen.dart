@@ -82,14 +82,28 @@ class YulCodeGenerator {
     return _asm.assemble();
   }
 
+  /// EIP-170 maximum deployed contract bytecode size (24,576 bytes).
+  static const maxDeployedBytes = 24576;
+
   /// Generates only the **deployed** (runtime) bytecode for [obj].
   ///
   /// This is the code that ends up stored on-chain (no constructor / deploy
   /// wrapper). Returns the sub-object's bytecode, or [obj]'s own code if it has
   /// no sub-object.
-  Uint8List generateDeployed(YulObject obj) => obj.subObjects.isNotEmpty
-      ? YulCodeGenerator().generate(obj.subObjects.first)
-      : YulCodeGenerator().generate(obj);
+  ///
+  /// Throws [ArgumentError] if the result exceeds the EIP-170 limit of 24,576 bytes.
+  Uint8List generateDeployed(YulObject obj) {
+    final bytes = obj.subObjects.isNotEmpty
+        ? YulCodeGenerator().generate(obj.subObjects.first)
+        : YulCodeGenerator().generate(obj);
+    if (bytes.length > maxDeployedBytes) {
+      throw ArgumentError(
+        'Deployed bytecode size ${bytes.length} bytes exceeds the EIP-170 '
+        'limit of $maxDeployedBytes bytes',
+      );
+    }
+    return bytes;
+  }
 
   // ── Block generation ────────────────────────────────────────────────────────
 

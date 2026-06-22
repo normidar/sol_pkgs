@@ -25,6 +25,15 @@ int runCompiler(List<String> args) {
       'include-path',
       help: 'Additional paths to search for imports.',
     )
+    ..addFlag(
+      'warnings-as-errors',
+      help: 'Treat warnings as compilation errors.',
+    )
+    ..addOption(
+      'output-dir',
+      abbr: 'o',
+      help: 'Write output files to this directory instead of stdout.',
+    )
     ..addFlag('version', negatable: false, help: 'Print version and exit.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.');
 
@@ -66,6 +75,8 @@ int runCompiler(List<String> args) {
   final showAbi = parsed['abi'] as bool;
   final showIr = parsed['ir'] as bool;
   final optimize = parsed['optimize'] as bool;
+  final warningsAsErrors = parsed['warnings-as-errors'] as bool;
+  final outputDir = parsed['output-dir'] as String?;
 
   final stack = CompilerStack(optimize: optimize);
   for (final path in files) {
@@ -83,7 +94,27 @@ int runCompiler(List<String> args) {
     (d.isError ? stderr : stdout).writeln(d);
   }
 
-  if (!result.success) return 1;
+  if (!result.isSuccess(warningsAsErrors: warningsAsErrors)) return 1;
+
+  if (outputDir != null) {
+    Directory(outputDir).createSync(recursive: true);
+    for (final entry in result.contracts.entries) {
+      final name = entry.key;
+      final out = entry.value;
+      if (showBin) {
+        File('$outputDir/$name.bin').writeAsStringSync(out.bytecodeHex);
+      }
+      if (showAbi) {
+        File('$outputDir/$name.abi').writeAsStringSync(
+          const JsonEncoder.withIndent('  ').convert(out.abi),
+        );
+      }
+      if (showIr) {
+        File('$outputDir/$name.yul').writeAsStringSync(out.yulIr);
+      }
+    }
+    return 0;
+  }
 
   for (final entry in result.contracts.entries) {
     final name = entry.key;
