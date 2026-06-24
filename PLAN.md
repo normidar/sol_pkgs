@@ -1,6 +1,6 @@
 # sol_pkgs — 実装状況と今後のプラン
 
-最終更新: 2026-06-19
+最終更新: 2026-06-22
 
 ---
 
@@ -419,7 +419,13 @@ ECDSA/RLP/JSON-RPC をすべて自前実装し、`sol_support` の keccak256 以
 
 ## 残存バグ（未修正）
 
-なし（既知のバグはすべて修正済み。未実装機能は各パッケージ表の ❌ を参照）。
+| # | 場所 | 内容 |
+|---|---|---|
+| B-36 | `sol_codegen/ir_generator.dart:1127` | 呼び出し対象が `Identifier` でない関数呼び出し (`super.foo()` / `this.foo()` など `MemberAccess` 経由の呼び出し) が未対応 → エラーではなく警告を出して呼び出し式全体をリテラル `0` に置き換える。副作用（state 変更・イベント発行等）が静かに消える「コンパイルは通るが壊れたバイトコードを生む」クラスの正確性バグ。詳細・再現コードは下記「CLI でコンパイル → チェーンへアップロードは可能か」セクション参照 |
+
+継承メンバー解決の未実装（`is` 継承した関数・状態変数が派生コントラクトから参照できない）は
+B-36 と関連するが「バグ」ではなく未実装機能のため、下記の新規セクションで個別に説明する。
+それ以外の未実装機能は各パッケージ表の ❌ を参照。
 
 ---
 
@@ -537,3 +543,138 @@ creation コード (11 bytes) は `codecopy` + `return` でランタイムを返
    self-consistency は満たす（決定的に同じ出力を生成する）が、**第三者の検証
    サービスと突き合わせる検証は不可**。対応には (a) メタデータ CBOR のバイトコード埋め込み、
    (b) sourceMap 生成、(c) solc 互換の最適化・コード配置、が最低限必要。
+
+---
+
+## CLI でコンパイル → チェーンへアップロードは可能か (2026-06-22 検証)
+
+`mise` で Dart 3.12.2 を導入し `melos bootstrap` した上で `sol_cli` を実際に
+実行して検証した結果。
+
+### 結論
+
+| やりたいこと | 状態 |
+|---|---|
+| `solc` CLI で Solidity ソースをコンパイル (bytecode/ABI/IR) | ✅ 可能 |
+| コンパイル結果をチェーンにデプロイ（アップロード） | ❌ CLI 非対応。`sol_web3` のライブラリ API を呼ぶ Dart コードが別途必要 |
+| OpenZeppelin の `ERC20` を継承するようなコントラクトのコンパイル | ❌ 不可（継承メンバーの名前解決・コード生成が未実装） |
+
+### 1. コンパイル単体は CLI で完結する
+
+```sh
+dart run sol_cli:solc --bin Adder.sol      # EVM バイトコード
+dart run sol_cli:solc --abi Adder.sol      # ABI JSON
+dart run sol_cli:solc --ir  Adder.sol      # Yul IR
+echo '{...}' | dart run sol_cli:solc --standard-json
+```
+
+`sol_cli`(`packages/sol_cli/bin/solc.dart` → `solc` コマンド) は `sol_driver` の
+`CompilerStack` を呼ぶだけの薄いラッパーで、継承を使わない自己完結コントラクトなら
+ここまでは正真正銘ワンライナーで完結する。
+
+### 2. チェーンへのデプロイは CLI 化されていない
+
+`sol_web3` の `pubspec.yaml` には `bin/` も `executables:` もなく、提供しているのは
+`ContractDeployer` / `EthereumClient` / `EthPrivateKey` などの **Dart ライブラリ
+API** のみ。`solc --deploy` のような1コマンドでの送信は存在しない。実際に送るには
+[`packages/sol_web3/example/full_pipeline_example.dart`](packages/sol_web3/example/full_pipeline_example.dart)
+のような Dart スクリプトを書いて `dart run` する必要がある:
+
+```dart
+final stack = CompilerStack()..addSource('Adder.sol', source);
+final bytecode = stack.compile().contracts['Adder']!.bytecode;
+
+final client = EthereumClient(Uri.parse('http://127.0.0.1:8545'));
+final result = await ContractDeployer(client).deploy(
+  credentials: EthPrivateKey.fromHex(privateKeyHex),
+  bytecode: bytecode,
+);
+```
+
+実テストネット/メインネットへの送信はこのリポジトリ内では未検証
+（ネットワークアクセスがない開発環境のため）。ローカル `HttpServer` を使った
+E2E テスト (`sol_web3/test/deploy_loopback_test.dart`) のみで検証済み。
+
+### 3. 実際に検証: OpenZeppelin 風 ERC20 継承は現状コンパイルできない
+
+以下のような、OpenZeppelin の `ERC20` を import して継承するコントラクトを
+最小再現で試した:
+
+```solidity
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+contract EconomyCoin is ERC20 {
+    constructor() ERC20("EconomyCoin", "ECO") {
+        _mint(msg.sender, INITIAL_SUPPLY);
+    }
+}
+```
+
+これは独立した2つの理由でコンパイルできない。
+
+**(a) `@openzeppelin/contracts/...` の import はそもそも解決されない。**
+`sol_driver` の `CompilerStack._resolveImports`(`compiler_stack.dart:77-95`) は、
+import 文字列と `addSource()` に渡したキーが**完全一致**した場合のみソースを
+リンクする。ディスクから相対パスでファイルを読みにいく処理も、npm 風パスを
+解決する処理もない。`sol_cli` は `--remappings` / `--base-path` /
+`--include-path` フラグを **引数として受け付けるだけ** で、
+`compiler_command.dart` 内のロジックはパース結果を一切参照していない
+(`sol_cli/test/cli_test.dart` のテストも「入力ファイルが無いので exit code 1」
+としか検証しておらず、解決ロジック自体はテストされていない)。加えて
+OpenZeppelin のソース自体もこのリポジトリには存在しない（vendoring なし）。
+
+**(b) 継承メンバーの名前解決・コード生成が未実装。**
+`sol_sema/resolver.dart` の `visitContractDefinition` は `node.members`
+（コントラクト自身が宣言したメンバー）だけをスコープに登録し、
+`node.baseContracts`（基底コントラクトのリスト）には一切アクセスしない。
+`baseContracts` を参照しているのは `sol_ast`（パース/AST 構造と visitor）と
+`sol_sema/contract_checker.dart`（override 整合性チェック）のみで、
+名前解決 (`Resolver`) とコード生成 (`sol_codegen/ir_generator.dart`) には
+継承の概念が存在しない。import 問題を避けて単一ファイルで最小再現しても
+同様に失敗する:
+
+```solidity
+contract Base {
+    uint256 public x;
+    function setX(uint256 v) public { x = v; }
+}
+contract Derived is Base {
+    function callSetX() public { setX(42); }   // public でも継承先から見えない
+}
+```
+
+```
+$ dart run sol_cli:solc --bin Derived.sol
+ERROR at 0:214:4: Undeclared identifier "setX"
+```
+
+`callSetX` を削除して `contract Derived is Base {}` だけにしても実害は同じで、
+生成される `Derived` の ABI は空 (`[]`) になる — `sol_codegen`/`sol_abi` も
+基底コントラクトの関数・public state variable getter を派生コントラクトの
+ディスパッチャ/ABI へマージしないため、継承された関数は呼び出せない状態で
+デプロイされることになる。`super.setX(42)` のように明示的に親を指定しても
+結果は変わらない。呼び出し対象が `Identifier` でない式（`MemberAccess` 経由の
+呼び出し全般）は `ir_generator.dart:1127` で **警告**を出すだけでコンパイル
+自体は継続し、呼び出し式がリテラル `0` に置き換わって副作用ごと消える
+(B-36 として上記「残存バグ」に記録)。
+
+> `sol_sema` の C3 多重継承線形化 (`c3_lineariser.dart`) は
+> `contract_checker.dart` の override 整合性チェックにのみ使われている。
+> `contract X is Y` は構文として受理され override 検査も機能するが、
+> **継承メンバーの実際の参照・継承の「実体化」（フラット化）は未実装**。
+
+### まとめ
+
+- 継承を使わない自己完結コントラクトなら、CLI コンパイルまでは現状でも問題なく
+  動く（`Adder`/`Counter`/最小 ERC20 風コントラクトを1ファイルにベタ書きする等)。
+- `is` 継承を使うコントラクト — まさに OpenZeppelin の `ERC20` を継承する
+  今回のサンプルコードのパターン — は **import 解決・名前解決・コード生成の
+  3段階すべてにギャップがあり、コンパイル不可**。
+- チェーンへのデプロイは常に CLI 非対応で、`sol_web3` を呼ぶ Dart コードが必要。
+  実ネットワークへの送信はこのリポジトリ内では未検証。
+- 継承を実際に使えるようにするには、最低限 (1) `sol_sema/resolver.dart` が
+  C3 線形化順序で基底コントラクトのメンバーを派生コントラクトのスコープに
+  マージする、(2) `sol_codegen` が継承された関数を派生コントラクトの
+  ディスパッチャ/ABI に含める（オーバーライドされていれば派生側を優先する）、
+  (3) `super.foo()` のような `MemberAccess` 呼び出しに対応する、
+  (4) ファイルシステム上のパス解決・remapping を実装する、の4点が必要。
