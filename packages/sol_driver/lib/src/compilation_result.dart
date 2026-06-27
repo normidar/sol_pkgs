@@ -11,6 +11,7 @@ class ContractOutput {
     this.devdoc = const {},
     this.userdoc = const {},
     this.metadata = const {},
+    this.deployedSourceMap = '',
   });
 
   final String name;
@@ -27,6 +28,11 @@ class ContractOutput {
 
   /// solc-compatible contract metadata JSON (abi + docs + settings + sources).
   final Map<String, dynamic> metadata;
+
+  /// solc-format compressed source map for [deployedBytecode]
+  /// (`s:l:f:j;...` per instruction). Empty string when the codegen did not
+  /// thread locations (e.g. hand-written Yul fixtures).
+  final String deployedSourceMap;
 
   String get bytecodeHex =>
       bytecode.map((b) => b.toRadixString(16).padLeft(2, '0')).join();

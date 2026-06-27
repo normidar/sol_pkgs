@@ -1,7 +1,15 @@
+import 'package:sol_support/sol_support.dart';
+
 /// Yul AST nodes (subset of the full Yul spec).
 ///
 /// See https://docs.soliditylang.org/en/latest/yul.html
-sealed class YulNode {}
+sealed class YulNode {
+  /// Optional pointer back to the Solidity source range this node was lowered
+  /// from. The IR generator populates it; the code generator forwards it
+  /// onto every emitted instruction so source maps can be reconstructed.
+  /// `null` for hand-written Yul (e.g. test fixtures) and synthetic helpers.
+  SourceLocation? location;
+}
 
 // ── Top-level ─────────────────────────────────────────────────────────────────
 

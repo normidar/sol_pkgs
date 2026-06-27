@@ -14,5 +14,7 @@ export 'src/deployer.dart';
 export 'src/eth_address.dart';
 export 'src/eth_client.dart';
 export 'src/json_rpc_client.dart';
+export 'src/json_rpc_transport.dart';
 export 'src/rlp.dart';
 export 'src/transaction.dart';
+export 'src/websocket_json_rpc_client.dart';

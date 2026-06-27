@@ -5,6 +5,8 @@ library;
 import 'dart:convert';
 import 'dart:io';
 
+import 'json_rpc_transport.dart';
+
 /// Thrown when a JSON-RPC call returns an `error` member, or when the
 /// transport / response framing is malformed.
 class JsonRpcException implements Exception {
@@ -21,7 +23,7 @@ class JsonRpcException implements Exception {
 
 /// Sends JSON-RPC 2.0 requests to a single HTTP endpoint (e.g. an Ethereum
 /// node's RPC URL) and returns the decoded `result` of each call.
-class JsonRpcClient {
+class JsonRpcClient implements JsonRpcTransport {
   JsonRpcClient(this.endpoint, {HttpClient? httpClient})
     : _httpClient = httpClient ?? HttpClient();
 
@@ -32,6 +34,7 @@ class JsonRpcClient {
   /// Calls [method] with positional [params] and returns the decoded
   /// `result`. Throws [JsonRpcException] on a JSON-RPC error response or a
   /// non-2xx HTTP status.
+  @override
   Future<Object?> call(String method, [List<Object?> params = const []]) async {
     final id = _nextId++;
     final body = jsonEncode({
@@ -68,5 +71,6 @@ class JsonRpcClient {
   }
 
   /// Closes the underlying HTTP client. Call when finished issuing requests.
+  @override
   void close() => _httpClient.close(force: true);
 }

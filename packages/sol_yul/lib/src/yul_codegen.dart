@@ -63,10 +63,21 @@ class YulCodeGenerator {
   /// When [obj] has a deployed sub-object (the runtime code), it is compiled
   /// separately and concatenated after the creation code; `dataoffset` /
   /// `datasize` references in the creation code resolve to its location/size.
-  Uint8List generate(YulObject obj) {
+  ///
+  /// [runtimeTrailer] is appended to the runtime code before the creation
+  /// wrapper records its `datasize`, so the CODECOPY in the wrapper covers
+  /// the trailer too. This is how an EIP-1167-style CBOR metadata blob is
+  /// kept inside the deployed contract.
+  Uint8List generate(YulObject obj, {Uint8List? runtimeTrailer}) {
     if (obj.subObjects.isNotEmpty) {
       final deployed = obj.subObjects.first;
-      final runtimeBytes = YulCodeGenerator().generate(deployed);
+      var runtimeBytes = YulCodeGenerator().generate(deployed);
+      if (runtimeTrailer != null && runtimeTrailer.isNotEmpty) {
+        final extended = Uint8List(runtimeBytes.length + runtimeTrailer.length);
+        extended.setRange(0, runtimeBytes.length, runtimeBytes);
+        extended.setRange(runtimeBytes.length, extended.length, runtimeTrailer);
+        runtimeBytes = extended;
+      }
       _deployedName = deployed.name;
       _deployedSize = runtimeBytes.length;
 
@@ -79,7 +90,12 @@ class YulCodeGenerator {
       return out;
     }
     _generateBlock(obj.code, hoistFunctions: true);
-    return _asm.assemble();
+    final code = _asm.assemble();
+    if (runtimeTrailer == null || runtimeTrailer.isEmpty) return code;
+    final out = Uint8List(code.length + runtimeTrailer.length);
+    out.setRange(0, code.length, code);
+    out.setRange(code.length, out.length, runtimeTrailer);
+    return out;
   }
 
   /// EIP-170 maximum deployed contract bytecode size (24,576 bytes).
@@ -92,17 +108,38 @@ class YulCodeGenerator {
   /// no sub-object.
   ///
   /// Throws [ArgumentError] if the result exceeds the EIP-170 limit of 24,576 bytes.
-  Uint8List generateDeployed(YulObject obj) {
+  Uint8List generateDeployed(YulObject obj, {Uint8List? runtimeTrailer}) {
     final bytes = obj.subObjects.isNotEmpty
         ? YulCodeGenerator().generate(obj.subObjects.first)
         : YulCodeGenerator().generate(obj);
-    if (bytes.length > maxDeployedBytes) {
+    final result = runtimeTrailer == null || runtimeTrailer.isEmpty
+        ? bytes
+        : (Uint8List(bytes.length + runtimeTrailer.length)
+            ..setRange(0, bytes.length, bytes)
+            ..setRange(
+              bytes.length,
+              bytes.length + runtimeTrailer.length,
+              runtimeTrailer,
+            ));
+    if (result.length > maxDeployedBytes) {
       throw ArgumentError(
-        'Deployed bytecode size ${bytes.length} bytes exceeds the EIP-170 '
+        'Deployed bytecode size ${result.length} bytes exceeds the EIP-170 '
         'limit of $maxDeployedBytes bytes',
       );
     }
-    return bytes;
+    return result;
+  }
+
+  /// Generates the **runtime** bytecode for [obj] along with a per-instruction
+  /// source map. Used to drive solc-style source map output in the driver.
+  ///
+  /// The CBOR metadata trailer (if any) is not modelled here because it is
+  /// pure data, not executable, and therefore not part of the source map.
+  AssembledOutput generateDeployedWithSourceMap(YulObject obj) {
+    final inner = obj.subObjects.isNotEmpty ? obj.subObjects.first : obj;
+    final gen = YulCodeGenerator();
+    gen._generateBlock(inner.code, hoistFunctions: true);
+    return gen._asm.assembleWithSourceMap();
   }
 
   // ── Block generation ────────────────────────────────────────────────────────
@@ -129,6 +166,10 @@ class YulCodeGenerator {
   // ── Statements ──────────────────────────────────────────────────────────────
 
   void _generateStatement(YulStatement stmt) {
+    _asm.withLocation(stmt.location, () => _generateStatementBody(stmt));
+  }
+
+  void _generateStatementBody(YulStatement stmt) {
     switch (stmt) {
       case YulBlock():
         _generateBlock(stmt);
@@ -267,6 +308,10 @@ class YulCodeGenerator {
   // ── Expressions ─────────────────────────────────────────────────────────────
 
   void _generateExpression(YulExpression expr) {
+    _asm.withLocation(expr.location, () => _generateExpressionBody(expr));
+  }
+
+  void _generateExpressionBody(YulExpression expr) {
     switch (expr) {
       case YulLiteral(:final value, :final kind):
         switch (kind) {

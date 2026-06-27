@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'codec.dart';
 import 'eth_address.dart';
 import 'json_rpc_client.dart';
+import 'json_rpc_transport.dart';
+import 'websocket_json_rpc_client.dart';
 
 // ── Log / event types ─────────────────────────────────────────────────────────
 
@@ -146,9 +148,41 @@ class TransactionReceipt {
 class EthereumClient {
   EthereumClient(Uri endpoint) : _rpc = JsonRpcClient(endpoint);
 
-  EthereumClient.withRpc(JsonRpcClient rpc) : _rpc = rpc;
+  EthereumClient.withRpc(JsonRpcTransport rpc) : _rpc = rpc;
 
-  final JsonRpcClient _rpc;
+  final JsonRpcTransport _rpc;
+
+  /// The underlying JSON-RPC transport. Useful when you need lower-level
+  /// access — e.g. to call [WebSocketJsonRpcClient.subscribe] on a
+  /// WebSocket-backed client.
+  JsonRpcTransport get transport => _rpc;
+
+  /// Subscribes to `newHeads` (one event per new block header).
+  ///
+  /// Requires the underlying transport to be a [WebSocketJsonRpcClient].
+  Future<({String id, Stream<Map<String, dynamic>> events})>
+  subscribeNewHeads() => _ws().subscribe('newHeads');
+
+  /// Subscribes to `logs` matching [filter].
+  ///
+  /// Requires the underlying transport to be a [WebSocketJsonRpcClient].
+  Future<({String id, Stream<Map<String, dynamic>> events})> subscribeLogs(
+    LogFilter filter,
+  ) => _ws().subscribe('logs', filter.toJson());
+
+  /// Cancels a previously created subscription.
+  Future<bool> unsubscribe(String subscriptionId) =>
+      _ws().unsubscribe(subscriptionId);
+
+  WebSocketJsonRpcClient _ws() {
+    final t = _rpc;
+    if (t is! WebSocketJsonRpcClient) {
+      throw StateError(
+        'eth_subscribe requires a WebSocketJsonRpcClient transport',
+      );
+    }
+    return t;
+  }
 
   Future<BigInt> chainId() async =>
       bigIntFromHex(await _rpc.call('eth_chainId') as String);
@@ -224,6 +258,6 @@ class EthereumClient {
         .toList();
   }
 
-  /// Closes the underlying HTTP connection.
-  void close() => _rpc.close();
+  /// Closes the underlying connection (HTTP client or WebSocket).
+  Future<void> close() async => _rpc.close();
 }

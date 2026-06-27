@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:sol_abi/sol_abi.dart';
 import 'package:sol_ast/sol_ast.dart';
 import 'package:sol_codegen/sol_codegen.dart';
@@ -5,6 +7,7 @@ import 'package:sol_lexer/sol_lexer.dart';
 import 'package:sol_parser/sol_parser.dart';
 import 'package:sol_sema/sol_sema.dart';
 import 'package:sol_support/sol_support.dart';
+import 'package:sol_evm/sol_evm.dart' show compressSourceMap;
 import 'package:sol_yul/sol_yul.dart';
 import 'compilation_result.dart';
 
@@ -17,12 +20,21 @@ import 'compilation_result.dart';
 ///   ..compile();
 /// ```
 class CompilerStack {
-  CompilerStack({this.optimize = false});
+  CompilerStack({this.optimize = false, this.bytecodeHash = 'none'});
 
   /// When true, the generated Yul IR is run through [YulOptimizer] before
   /// bytecode generation (constant folding, simplification, dead-code
   /// elimination). Mirrors solc's `settings.optimizer.enabled`.
   final bool optimize;
+
+  /// Controls how (or whether) a CBOR-encoded metadata blob is appended to
+  /// the runtime bytecode. Mirrors solc's `settings.metadata.bytecodeHash`:
+  /// - `'none'` (default): nothing is appended.
+  /// - `'keccak256'`: appends `CBOR{keccak256: H, soldart: ver}||len2` where
+  ///   `H` is the keccak256 of the metadata JSON. The trailing two bytes
+  ///   are the big-endian length of the CBOR blob, so a verifier can
+  ///   recover the metadata pointer the same way as for solc bytecode.
+  final String bytecodeHash;
 
   final SourceUnitRegistry _registry = SourceUnitRegistry();
   final DiagnosticCollector _diagnostics = DiagnosticCollector();
@@ -160,16 +172,31 @@ class CompilerStack {
         yulObj = YulOptimizer().optimize(yulObj);
       }
       final yulIr = YulPrinter().print(yulObj);
-      final bytecode = YulCodeGenerator().generate(yulObj);
-      final deployedBytecode = YulCodeGenerator().generateDeployed(yulObj);
       final abi = AbiGenerator().generate(contract);
       final docs = DocGenerator();
-      final metadata = const MetadataGenerator().generate(
+      const meta = MetadataGenerator();
+      final metadata = meta.generate(
         sourcePath: sourcePath,
         sourceContent: sourceContent,
         contract: contract,
         optimizerEnabled: optimize,
+        bytecodeHash: bytecodeHash,
       );
+      final trailer = bytecodeHash == 'none'
+          ? null
+          : meta.encodeMetadataTrailer(jsonEncode(metadata));
+      final bytecode = YulCodeGenerator().generate(
+        yulObj,
+        runtimeTrailer: trailer,
+      );
+      final deployedBytecode = YulCodeGenerator().generateDeployed(
+        yulObj,
+        runtimeTrailer: trailer,
+      );
+      final deployedWithMap = YulCodeGenerator().generateDeployedWithSourceMap(
+        yulObj,
+      );
+      final deployedSourceMap = compressSourceMap(deployedWithMap.sourceMap);
 
       return ContractOutput(
         name: contract.name,
@@ -180,6 +207,7 @@ class CompilerStack {
         devdoc: docs.devdoc(contract),
         userdoc: docs.userdoc(contract),
         metadata: metadata,
+        deployedSourceMap: deployedSourceMap,
       );
     } catch (e) {
       _diagnostics.error('Code generation failed for ${contract.name}: $e');

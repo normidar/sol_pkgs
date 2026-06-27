@@ -429,5 +429,20 @@ contract Empty {}
       expect((src['keccak256'] as String).startsWith('0x'), isTrue);
       expect(src['license'], 'MIT');
     });
+
+    test('encodeMetadataTrailer produces a CBOR map plus 2-byte length', () {
+      const meta = MetadataGenerator();
+      // Any non-empty JSON works — we are just testing the framing.
+      final trailer = meta.encodeMetadataTrailer(
+        '{"v":1}',
+        compilerVersion: 'soldart-0.1.0',
+      );
+      // Last two bytes are big-endian length of the CBOR body.
+      final len =
+          (trailer[trailer.length - 2] << 8) | trailer[trailer.length - 1];
+      expect(len, trailer.length - 2);
+      // CBOR map header: 0xa2 → map(2 entries).
+      expect(trailer[0], 0xa2);
+    });
   });
 }

@@ -73,11 +73,146 @@ class YulOptimizer {
   }
 
   /// Whether [fn] is eligible for inlining:
-  ///  * body is small enough
-  ///  * does not call itself (direct recursion check)
-  bool _canInline(YulFunctionDefinition fn) {
-    if (_countStmts(fn.body) > inlineThreshold) return false;
-    return !_callsItself(fn.body, fn.name);
+  ///  * not part of any recursive cycle in the call graph (direct or mutual)
+  ///  * AND (small enough OR called from exactly one site — single-callers are
+  ///    always a size win because the body replaces the call instead of being
+  ///    duplicated)
+  bool _canInline(
+    YulFunctionDefinition fn, {
+    required Set<String> recursive,
+    required Map<String, int> callCounts,
+  }) {
+    if (recursive.contains(fn.name)) return false;
+    final singleCaller = (callCounts[fn.name] ?? 0) == 1;
+    if (!singleCaller && _countStmts(fn.body) > inlineThreshold) return false;
+    return true;
+  }
+
+  /// Builds a `caller → callees` graph for the function definitions in
+  /// [block] and returns the set of functions that participate in any cycle
+  /// (direct self-recursion or mutual recursion via other functions).
+  ///
+  /// Functions outside that set are safe to inline without risking infinite
+  /// expansion.
+  Set<String> _recursiveFunctions(Map<String, YulFunctionDefinition> defs) {
+    final graph = <String, Set<String>>{};
+    for (final entry in defs.entries) {
+      graph[entry.key] = _collectCalleeNames(
+        entry.value.body,
+        defs.keys.toSet(),
+      );
+    }
+    final recursive = <String>{};
+    // A function is recursive iff it can reach itself in the call graph.
+    for (final name in graph.keys) {
+      final visited = <String>{};
+      final stack = [...graph[name]!];
+      while (stack.isNotEmpty) {
+        final cur = stack.removeLast();
+        if (cur == name) {
+          recursive.add(name);
+          break;
+        }
+        if (!visited.add(cur)) continue;
+        stack.addAll(graph[cur] ?? const <String>{});
+      }
+    }
+    return recursive;
+  }
+
+  Set<String> _collectCalleeNames(YulNode node, Set<String> universe) {
+    final out = <String>{};
+    void visit(YulNode n) {
+      switch (n) {
+        case YulFunctionCall(:final name, :final arguments):
+          if (universe.contains(name)) out.add(name);
+          for (final a in arguments) {
+            visit(a);
+          }
+        case YulBlock(:final statements):
+          for (final s in statements) {
+            visit(s);
+          }
+        case YulVariableDeclaration(:final value):
+          if (value != null) visit(value);
+        case YulAssignment(:final value):
+          visit(value);
+        case YulExpressionStatement(:final expression):
+          visit(expression);
+        case YulIf(:final condition, :final body):
+          visit(condition);
+          visit(body);
+        case YulForLoop(:final pre, :final condition, :final post, :final body):
+          visit(pre);
+          visit(condition);
+          visit(post);
+          visit(body);
+        case YulSwitch(:final expression, :final cases, :final defaultCase):
+          visit(expression);
+          for (final c in cases) {
+            visit(c.body);
+          }
+          if (defaultCase != null) visit(defaultCase);
+        case YulFunctionDefinition(:final body):
+          visit(body);
+        default:
+          break;
+      }
+    }
+
+    visit(node);
+    return out;
+  }
+
+  /// Counts how many times each function in [defs] is called within [block].
+  ///
+  /// Used to single out functions with exactly one caller, which we always
+  /// inline (replacing a call with the body never grows the program).
+  Map<String, int> _countCalls(
+    YulBlock block,
+    Map<String, YulFunctionDefinition> defs,
+  ) {
+    final counts = <String, int>{for (final k in defs.keys) k: 0};
+    void visit(YulNode n) {
+      switch (n) {
+        case YulFunctionCall(:final name, :final arguments):
+          if (counts.containsKey(name)) counts[name] = counts[name]! + 1;
+          for (final a in arguments) {
+            visit(a);
+          }
+        case YulBlock(:final statements):
+          for (final s in statements) {
+            visit(s);
+          }
+        case YulVariableDeclaration(:final value):
+          if (value != null) visit(value);
+        case YulAssignment(:final value):
+          visit(value);
+        case YulExpressionStatement(:final expression):
+          visit(expression);
+        case YulIf(:final condition, :final body):
+          visit(condition);
+          visit(body);
+        case YulForLoop(:final pre, :final condition, :final post, :final body):
+          visit(pre);
+          visit(condition);
+          visit(post);
+          visit(body);
+        case YulSwitch(:final expression, :final cases, :final defaultCase):
+          visit(expression);
+          for (final c in cases) {
+            visit(c.body);
+          }
+          if (defaultCase != null) visit(defaultCase);
+        case YulFunctionDefinition(:final body):
+          visit(body);
+        default:
+          break;
+      }
+    }
+
+    visit(block);
+    return counts;
   }
 
   /// Counts statements recursively inside [block].
@@ -101,50 +236,23 @@ class YulOptimizer {
     return n;
   }
 
-  /// Returns true if [block] contains a direct call to [name].
-  bool _callsItself(YulBlock block, String name) {
-    return _exprCallsItself(YulBlock(block.statements), name);
-  }
-
-  bool _exprCallsItself(YulNode node, String name) {
-    switch (node) {
-      case YulFunctionCall(name: final callName, :final arguments):
-        if (callName == name) return true;
-        return arguments.any((a) => _exprCallsItself(a, name));
-      case YulBlock(:final statements):
-        return statements.any((s) => _exprCallsItself(s, name));
-      case YulVariableDeclaration(:final value):
-        return value != null && _exprCallsItself(value, name);
-      case YulAssignment(:final value):
-        return _exprCallsItself(value, name);
-      case YulExpressionStatement(:final expression):
-        return _exprCallsItself(expression, name);
-      case YulIf(:final condition, :final body):
-        return _exprCallsItself(condition, name) ||
-            _exprCallsItself(body, name);
-      case YulForLoop(:final pre, :final condition, :final post, :final body):
-        return _exprCallsItself(pre, name) ||
-            _exprCallsItself(condition, name) ||
-            _exprCallsItself(post, name) ||
-            _exprCallsItself(body, name);
-      case YulSwitch(:final expression, :final cases, :final defaultCase):
-        return _exprCallsItself(expression, name) ||
-            cases.any((c) => _exprCallsItself(c.body, name)) ||
-            (defaultCase != null && _exprCallsItself(defaultCase, name));
-      case YulFunctionDefinition(:final body):
-        return _exprCallsItself(body, name);
-      default:
-        return false;
-    }
-  }
-
   /// Runs the inlining pass over [block]: replaces eligible calls in statement
   /// context with their expanded bodies.
   YulBlock _inlineBlock(YulBlock block) {
     final defs = _collectDefs(block);
+    if (defs.isEmpty) return block;
+    final recursive = _recursiveFunctions(defs);
+    final callCounts = _countCalls(block, defs);
+
     final eligible = <String, YulFunctionDefinition>{};
     for (final entry in defs.entries) {
-      if (_canInline(entry.value)) eligible[entry.key] = entry.value;
+      if (_canInline(
+        entry.value,
+        recursive: recursive,
+        callCounts: callCounts,
+      )) {
+        eligible[entry.key] = entry.value;
+      }
     }
     if (eligible.isEmpty) return block;
 
@@ -317,6 +425,16 @@ class YulOptimizer {
     Map<String, String> rename, {
     bool leaveToBreak = false,
   }) {
+    final out = _substituteStmtBody(s, rename, leaveToBreak: leaveToBreak);
+    out.location ??= s.location;
+    return out;
+  }
+
+  YulStatement _substituteStmtBody(
+    YulStatement s,
+    Map<String, String> rename, {
+    bool leaveToBreak = false,
+  }) {
     switch (s) {
       case YulLeave() when leaveToBreak:
         return YulBreak();
@@ -387,6 +505,15 @@ class YulOptimizer {
   }
 
   YulExpression _substituteExpr(YulExpression e, Map<String, String> rename) {
+    final out = _substituteExprBody(e, rename);
+    out.location ??= e.location;
+    return out;
+  }
+
+  YulExpression _substituteExprBody(
+    YulExpression e,
+    Map<String, String> rename,
+  ) {
     switch (e) {
       case YulIdentifier(:final name):
         final newName = rename[name];
@@ -407,6 +534,12 @@ class YulOptimizer {
       YulBlock(block.statements.map(_statement).toList());
 
   YulStatement _statement(YulStatement s) {
+    final out = _statementBody(s);
+    out.location ??= s.location;
+    return out;
+  }
+
+  YulStatement _statementBody(YulStatement s) {
     switch (s) {
       case YulBlock():
         return _block(s);
@@ -456,6 +589,12 @@ class YulOptimizer {
   // ── Expression transformation ───────────────────────────────────────────────
 
   YulExpression _expr(YulExpression e) {
+    final out = _exprBody(e);
+    out.location ??= e.location;
+    return out;
+  }
+
+  YulExpression _exprBody(YulExpression e) {
     if (e is! YulFunctionCall) return e;
     final args = e.arguments.map(_expr).toList();
     final call = YulFunctionCall(e.name, args);

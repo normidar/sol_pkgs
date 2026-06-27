@@ -53,6 +53,12 @@ class StandardJson {
           'ir': entry.value.yulIr,
           'evm': {
             'bytecode': {'object': entry.value.bytecodeHex},
+            'deployedBytecode': {
+              'object': entry.value.deployedBytecode
+                  .map((b) => b.toRadixString(16).padLeft(2, '0'))
+                  .join(),
+              'sourceMap': entry.value.deployedSourceMap,
+            },
           },
         },
       };

@@ -505,6 +505,56 @@ void main() {
     });
   });
 
+  group('YulOptimizer — inlining', () {
+    String opt(String src) => YulPrinter().print(
+      YulOptimizer().optimizeBlock(YulParser(src).parseBlock()),
+    );
+
+    test('skips functions that are part of a mutual-recursion cycle', () {
+      // a → b → a: the call-graph cycle must keep both functions intact.
+      const src = '''{
+        function a() { b() }
+        function b() { a() }
+        a()
+      }''';
+      final out = opt(src);
+      // Both definitions must survive (they cannot be inlined).
+      expect(out, contains('function a()'));
+      expect(out, contains('function b()'));
+    });
+
+    test('inlines a single-caller function even if its body is large', () {
+      // 13 statements — above the default threshold of 12 — but called only
+      // once, so the new call-count heuristic should still inline it.
+      const src = '''{
+        function fat() -> r {
+          let a1 := 1
+          let a2 := 2
+          let a3 := 3
+          let a4 := 4
+          let a5 := 5
+          let a6 := 6
+          let a7 := 7
+          let a8 := 8
+          let a9 := 9
+          let a10 := 10
+          let a11 := 11
+          let a12 := 12
+          r := add(a1, add(a2, add(a3, add(a4, add(a5, add(a6, add(a7, add(a8, add(a9, add(a10, add(a11, a12)))))))))))
+        }
+        let total := fat()
+        sstore(0, total)
+      }''';
+      final out = opt(src);
+      // After inlining, the call site is replaced by a `for {} 1 {} { ... break }`
+      // loop and a fresh `_il<n>_r` return slot. The function definition itself
+      // survives (DCE keeps definitions), so we check on the call-site shape.
+      expect(out, contains('_il0_r'));
+      expect(out, contains('let total := _il0_r'));
+      expect(out, isNot(contains('let total := fat()')));
+    });
+  });
+
   group('YulOptimizer — preserves behaviour', () {
     test('optimised object still produces bytecode', () {
       final obj =

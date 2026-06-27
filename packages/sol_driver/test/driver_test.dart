@@ -271,6 +271,86 @@ contract Adder {
     });
   });
 
+  group('source map', () {
+    test(
+      'Adder produces a non-empty source map with multiple distinct ranges',
+      () {
+        final c = (CompilerStack()..addSource('Adder.sol', _adderSource))
+            .compile()
+            .contracts['Adder']!;
+        final sm = c.deployedSourceMap;
+        expect(sm, isNotEmpty);
+        // Compressed form uses `;` between instructions.
+        expect(sm.contains(';'), isTrue);
+        // At least one entry should point at a real source offset (i.e. not all
+        // "unknown" -1's). The very first entry is the full `s:l:f:j` quad.
+        final firstEntry = sm.split(';').first;
+        final fields = firstEntry.split(':');
+        expect(fields.length, greaterThanOrEqualTo(3));
+        // We do not require fields[0] != '-1' because the dispatcher prologue is
+        // synthetic; instead, scan for any entry with a non-negative start.
+        final hasReal = sm.split(';').any((e) {
+          final s = e.split(':').first;
+          return s.isNotEmpty && !s.startsWith('-');
+        });
+        expect(hasReal, isTrue);
+      },
+    );
+
+    test('standard-json output surfaces deployedBytecode.sourceMap', () {
+      final input = jsonEncode({
+        'language': 'Solidity',
+        'sources': {
+          'Adder.sol': {'content': _adderSource},
+        },
+        'settings': {
+          'outputSelection': {
+            '*': {
+              '*': ['evm.deployedBytecode.sourceMap'],
+            },
+          },
+        },
+      });
+      final out =
+          jsonDecode(StandardJson().compile(input)) as Map<String, dynamic>;
+      final adder = out['contracts']['Adder']['Adder'] as Map<String, dynamic>;
+      final deployed =
+          (adder['evm'] as Map)['deployedBytecode'] as Map<String, dynamic>;
+      expect(deployed['sourceMap'], isA<String>());
+      expect((deployed['sourceMap'] as String).isNotEmpty, isTrue);
+    });
+  });
+
+  group('bytecodeHash trailer', () {
+    test('default (none) does not append CBOR', () {
+      final c = (CompilerStack()..addSource('Adder.sol', _adderSource))
+          .compile()
+          .contracts['Adder']!;
+      // The runtime ends with the dispatcher's revert (0x5f 0x5f 0xfd) when no
+      // trailer is present, so the trailer length-encoding (0x00 0xNN) at the
+      // very end is not what we expect to see.
+      final last = c.deployedBytecode.last;
+      expect(last, isNot(equals(0x00)));
+    });
+
+    test('keccak256 appends CBOR map ending in length-2 trailer', () {
+      final c = (CompilerStack(
+        bytecodeHash: 'keccak256',
+      )..addSource('Adder.sol', _adderSource)).compile().contracts['Adder']!;
+      final code = c.deployedBytecode;
+      // Last two bytes are big-endian length of the CBOR body.
+      final len = (code[code.length - 2] << 8) | code[code.length - 1];
+      expect(len, greaterThan(0));
+      expect(len + 2, lessThanOrEqualTo(code.length));
+      // CBOR map header for 2 entries.
+      expect(code[code.length - 2 - len], 0xa2);
+      // Creation code embeds the runtime+trailer.
+      expect(c.bytecode.sublist(c.bytecode.length - code.length), equals(code));
+      // The metadata.bytecodeHash setting is recorded as keccak256.
+      expect(c.metadata['settings']['metadata']['bytecodeHash'], 'keccak256');
+    });
+  });
+
   group('StandardJson', () {
     test('round-trips standard-json format', () {
       final input = jsonEncode({

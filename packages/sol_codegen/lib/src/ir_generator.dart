@@ -527,6 +527,12 @@ class IRGenerator {
   }
 
   YulStatement _generateStatement(Statement stmt) {
+    final out = _generateStatementBody(stmt);
+    out.location ??= stmt.location;
+    return out;
+  }
+
+  YulStatement _generateStatementBody(Statement stmt) {
     switch (stmt) {
       case ReturnStatement(:final expression):
         if (expression == null || _returnSlots.isEmpty) return YulLeave();
@@ -986,6 +992,12 @@ class IRGenerator {
       YulLiteral('${_stateVarSlots[name]}', YulLiteralKind.number);
 
   YulExpression _generateExpression(Expression expr) {
+    final out = _generateExpressionBody(expr);
+    out.location ??= expr.location;
+    return out;
+  }
+
+  YulExpression _generateExpressionBody(Expression expr) {
     switch (expr) {
       case Literal(:final kind, :final value):
         // String/unicode string literals are packed into Solidity's short-string
