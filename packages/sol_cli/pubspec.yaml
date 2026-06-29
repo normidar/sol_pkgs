@@ -11,6 +11,8 @@ dependencies:
   sol_support: ^0.1.0+1
   sol_driver: ^0.1.1
   sol_web3: ^0.1.0
+  sol_abi: ^0.1.0
+  sol_types: ^0.1.0
   args: ^2.5.0
 
 dev_dependencies:

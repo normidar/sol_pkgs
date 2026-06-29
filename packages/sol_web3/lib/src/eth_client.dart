@@ -258,6 +258,29 @@ class EthereumClient {
         .toList();
   }
 
+  /// Executes a read-only call against [to] with [data] and returns the raw
+  /// return bytes. Uses the given [blockTag] (default `'latest'`).
+  Future<Uint8List> ethCall({
+    required EthAddress to,
+    required Uint8List data,
+    EthAddress? from,
+    String blockTag = 'latest',
+  }) async {
+    final params = <String, dynamic>{
+      'to': to.toHex(),
+      'data': bytesToHex(data, include0x: true),
+      if (from != null) 'from': from.toHex(),
+    };
+    final hex = await _rpc.call('eth_call', [params, blockTag]) as String;
+    final clean = hex.startsWith('0x') ? hex.substring(2) : hex;
+    if (clean.isEmpty) return Uint8List(0);
+    final bytes = Uint8List(clean.length ~/ 2);
+    for (var i = 0; i < bytes.length; i++) {
+      bytes[i] = int.parse(clean.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return bytes;
+  }
+
   /// Closes the underlying connection (HTTP client or WebSocket).
   Future<void> close() async => _rpc.close();
 }
