@@ -11,10 +11,12 @@ import 'package:test/test.dart';
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /// Runs [runCompiler] with captured stdout/stderr.
-({int exitCode, String out, String err}) _run(List<String> args) {
+Future<({int exitCode, String out, String err})> _run(
+  List<String> args,
+) async {
   final outBuf = StringBuffer();
   final errBuf = StringBuffer();
-  final code = IOOverrides.runZoned(
+  final code = await IOOverrides.runZoned(
     () => runCompiler(args),
     stdout: () => _StringSink(outBuf),
     stderr: () => _StringSink(errBuf),
@@ -248,86 +250,86 @@ class _LineStdin implements Stdin {
 
 void main() {
   group('CLI flags', () {
-    test('--help returns 0 and prints usage', () {
-      final r = _run(['--help']);
+    test('--help returns 0 and prints usage', () async {
+      final r = await _run(['--help']);
       expect(r.exitCode, 0);
       expect(r.out, contains('solc-dart'));
       expect(r.out, contains('[no-]bin'));
     });
 
-    test('--version returns 0 and prints version string', () {
-      final r = _run(['--version']);
+    test('--version returns 0 and prints version string', () async {
+      final r = await _run(['--version']);
       expect(r.exitCode, 0);
       expect(r.out, contains('solc-dart'));
     });
 
-    test('no input files returns 1 with error message', () {
-      final r = _run([]);
+    test('no input files returns 1 with error message', () async {
+      final r = await _run([]);
       expect(r.exitCode, 1);
       expect(r.err, contains('No input files'));
     });
 
-    test('unknown flag returns 1', () {
-      expect(_run(['--totally-unknown-flag-xyz']).exitCode, 1);
+    test('unknown flag returns 1', () async {
+      expect((await _run(['--totally-unknown-flag-xyz'])).exitCode, 1);
     });
 
-    test('--optimize alone (no files) returns 1, not a flag error', () {
-      final r = _run(['--optimize']);
+    test('--optimize alone (no files) returns 1, not a flag error', () async {
+      final r = await _run(['--optimize']);
       expect(r.exitCode, 1);
       expect(r.err, contains('No input files'));
     });
 
-    test('--warnings-as-errors flag accepted', () {
-      expect(_run(['--warnings-as-errors']).exitCode, 1);
+    test('--warnings-as-errors flag accepted', () async {
+      expect((await _run(['--warnings-as-errors'])).exitCode, 1);
     });
 
-    test('--output-dir flag accepted', () {
-      expect(_run(['--output-dir', '/tmp']).exitCode, 1);
+    test('--output-dir flag accepted', () async {
+      expect((await _run(['--output-dir', '/tmp'])).exitCode, 1);
     });
 
-    test('--remappings flag accepted', () {
-      expect(_run(['--remappings', 'prefix=target']).exitCode, 1);
+    test('--remappings flag accepted', () async {
+      expect((await _run(['--remappings', 'prefix=target'])).exitCode, 1);
     });
 
-    test('--base-path flag accepted', () {
-      expect(_run(['--base-path', '/some/path']).exitCode, 1);
+    test('--base-path flag accepted', () async {
+      expect((await _run(['--base-path', '/some/path'])).exitCode, 1);
     });
 
-    test('--include-path flag accepted', () {
-      expect(_run(['--include-path', '/some/path']).exitCode, 1);
+    test('--include-path flag accepted', () async {
+      expect((await _run(['--include-path', '/some/path'])).exitCode, 1);
     });
   });
 
   group('file errors', () {
-    test('non-existent file returns 1 with error message', () {
-      final r = _run(['/nonexistent/path/Missing.sol']);
+    test('non-existent file returns 1 with error message', () async {
+      final r = await _run(['/nonexistent/path/Missing.sol']);
       expect(r.exitCode, 1);
       expect(r.err, contains('file not found'));
     });
 
-    test('contract with syntax error returns 1', () {
+    test('contract with syntax error returns 1', () async {
       final path = _tempSol(_syntaxError);
-      expect(_run([path]).exitCode, 1);
+      expect((await _run([path])).exitCode, 1);
     });
   });
 
   group('compilation output', () {
-    test('valid contract compiles successfully (exit 0)', () {
+    test('valid contract compiles successfully (exit 0)', () async {
       final path = _tempSol(_counter);
-      expect(_run([path]).exitCode, 0);
+      expect((await _run([path])).exitCode, 0);
     });
 
-    test('--bin outputs hex bytecode section', () {
+    test('--bin outputs hex bytecode section', () async {
       final path = _tempSol(_counter);
-      final r = _run(['--bin', path]);
+      final r = await _run(['--bin', path]);
       expect(r.exitCode, 0);
       expect(r.out, contains('Binary:'));
       expect(r.out, matches(RegExp(r'[0-9a-f]{10,}')));
     });
 
-    test('--abi outputs parseable JSON array', () {
+    test('--abi outputs parseable JSON array', () async {
       final path = _tempSol(_counter);
-      final r = _run(['--abi', path]);
+      final r = await _run(['--abi', path]);
       expect(r.exitCode, 0);
       expect(r.out, contains('Contract JSON ABI:'));
       final jsonStart = r.out.indexOf('[');
@@ -339,9 +341,9 @@ void main() {
 
     test(
       '--abi includes public function and state-variable getter entries',
-      () {
+      () async {
         final path = _tempSol(_counter);
-        final r = _run(['--abi', path]);
+        final r = await _run(['--abi', path]);
         final jsonStart = r.out.indexOf('[');
         final abi = (jsonDecode(r.out.substring(jsonStart)) as List)
             .cast<Map<String, dynamic>>();
@@ -350,23 +352,23 @@ void main() {
       },
     );
 
-    test('--ir outputs Yul IR with "object" keyword', () {
+    test('--ir outputs Yul IR with "object" keyword', () async {
       final path = _tempSol(_counter);
-      final r = _run(['--ir', path]);
+      final r = await _run(['--ir', path]);
       expect(r.exitCode, 0);
       expect(r.out, contains('IR:'));
       expect(r.out, contains('object'));
     });
 
-    test('--bin --abi outputs both sections', () {
+    test('--bin --abi outputs both sections', () async {
       final path = _tempSol(_counter);
-      final r = _run(['--bin', '--abi', path]);
+      final r = await _run(['--bin', '--abi', path]);
       expect(r.exitCode, 0);
       expect(r.out, contains('Binary:'));
       expect(r.out, contains('Contract JSON ABI:'));
     });
 
-    test('--output-dir writes .bin and .abi files', () {
+    test('--output-dir writes .bin and .abi files', () async {
       final path = _tempSol(_counter);
       final dir = Directory(
         '${Directory.systemTemp.path}/sol_cli_test_outdir_'
@@ -375,27 +377,27 @@ void main() {
       addTearDown(() {
         if (dir.existsSync()) dir.deleteSync(recursive: true);
       });
-      final r = _run(['--bin', '--abi', '--output-dir', dir.path, path]);
+      final r = await _run(['--bin', '--abi', '--output-dir', dir.path, path]);
       expect(r.exitCode, 0);
       expect(File('${dir.path}/Counter.bin').existsSync(), isTrue);
       expect(File('${dir.path}/Counter.abi').existsSync(), isTrue);
     });
 
-    test('--warnings-as-errors with no warnings exits 0', () {
+    test('--warnings-as-errors with no warnings exits 0', () async {
       final path = _tempSol(_counter);
-      expect(_run(['--warnings-as-errors', path]).exitCode, 0);
+      expect((await _run(['--warnings-as-errors', path])).exitCode, 0);
     });
 
-    test('--optimize --bin produces valid bytecode', () {
+    test('--optimize --bin produces valid bytecode', () async {
       final path = _tempSol(_counter);
-      final r = _run(['--optimize', '--bin', path]);
+      final r = await _run(['--optimize', '--bin', path]);
       expect(r.exitCode, 0);
       expect(r.out, matches(RegExp(r'[0-9a-f]{10,}')));
     });
 
-    test('output section header contains contract name', () {
+    test('output section header contains contract name', () async {
       final path = _tempSol(_counter);
-      final r = _run(['--bin', path]);
+      final r = await _run(['--bin', path]);
       expect(r.out, contains('Counter'));
     });
   });
@@ -403,7 +405,7 @@ void main() {
   group('standard-json mode', () {
     test(
       'valid standard-JSON input compiles and returns JSON with contracts',
-      () {
+      () async {
         final source = _counter;
         final input = jsonEncode({
           'language': 'Solidity',
@@ -421,7 +423,7 @@ void main() {
 
         final outBuf = StringBuffer();
         final errBuf = StringBuffer();
-        final code = IOOverrides.runZoned(
+        final code = await IOOverrides.runZoned(
           () => runCompiler(['--standard-json']),
           stdout: () => _StringSink(outBuf),
           stderr: () => _StringSink(errBuf),
@@ -434,7 +436,8 @@ void main() {
       },
     );
 
-    test('standard-JSON with syntax error returns JSON with errors field', () {
+    test('standard-JSON with syntax error returns JSON with errors field',
+        () async {
       final input = jsonEncode({
         'language': 'Solidity',
         'sources': {
@@ -448,7 +451,7 @@ void main() {
       });
 
       final outBuf = StringBuffer();
-      IOOverrides.runZoned(
+      await IOOverrides.runZoned(
         () => runCompiler(['--standard-json']),
         stdout: () => _StringSink(outBuf),
         stderr: () => _StringSink(StringBuffer()),
