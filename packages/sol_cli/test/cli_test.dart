@@ -11,9 +11,7 @@ import 'package:test/test.dart';
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /// Runs [runCompiler] with captured stdout/stderr.
-Future<({int exitCode, String out, String err})> _run(
-  List<String> args,
-) async {
+Future<({int exitCode, String out, String err})> _run(List<String> args) async {
   final outBuf = StringBuffer();
   final errBuf = StringBuffer();
   final code = await IOOverrides.runZoned(
@@ -436,31 +434,33 @@ void main() {
       },
     );
 
-    test('standard-JSON with syntax error returns JSON with errors field',
-        () async {
-      final input = jsonEncode({
-        'language': 'Solidity',
-        'sources': {
-          'Bad.sol': {'content': _syntaxError},
-        },
-        'settings': {
-          'outputSelection': {
-            '*': {'*': <String>[]},
+    test(
+      'standard-JSON with syntax error returns JSON with errors field',
+      () async {
+        final input = jsonEncode({
+          'language': 'Solidity',
+          'sources': {
+            'Bad.sol': {'content': _syntaxError},
           },
-        },
-      });
+          'settings': {
+            'outputSelection': {
+              '*': {'*': <String>[]},
+            },
+          },
+        });
 
-      final outBuf = StringBuffer();
-      await IOOverrides.runZoned(
-        () => runCompiler(['--standard-json']),
-        stdout: () => _StringSink(outBuf),
-        stderr: () => _StringSink(StringBuffer()),
-        stdin: () => _LineStdin(input),
-      );
+        final outBuf = StringBuffer();
+        await IOOverrides.runZoned(
+          () => runCompiler(['--standard-json']),
+          stdout: () => _StringSink(outBuf),
+          stderr: () => _StringSink(StringBuffer()),
+          stdin: () => _LineStdin(input),
+        );
 
-      final result = jsonDecode(outBuf.toString()) as Map<String, dynamic>;
-      // On failure the output should at minimum be a JSON object.
-      expect(result, isA<Map>());
-    });
+        final result = jsonDecode(outBuf.toString()) as Map<String, dynamic>;
+        // On failure the output should at minimum be a JSON object.
+        expect(result, isA<Map>());
+      },
+    );
   });
 }

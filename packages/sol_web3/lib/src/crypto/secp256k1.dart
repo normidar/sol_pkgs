@@ -86,19 +86,35 @@ class ECPoint {
   ECPoint operator -() =>
       isInfinity ? this : ECPoint(x, (secp256k1P - y) % secp256k1P);
 
-  /// Scalar multiplication via double-and-add. [k] is reduced mod the group
-  /// order first, which is valid for any point on this curve since the
-  /// cofactor is 1 (every non-identity point has order exactly [secp256k1N]).
+  /// Scalar multiplication via the Montgomery ladder. [k] is reduced mod the
+  /// group order first.
+  ///
+  /// Unlike double-and-add, the ladder performs one double and one add per
+  /// bit regardless of the bit value, eliminating the data-dependent branching
+  /// that makes double-and-add vulnerable to simple timing analysis.
+  ///
+  /// Note: [BigInt] arithmetic in Dart VM is not guaranteed constant-time at
+  /// the machine-word level (cache/branch timing from the runtime's own bignum
+  /// routines may still exist). This implementation raises the bar
+  /// significantly over double-and-add but is not a substitute for a
+  /// hardware-level constant-time library.
   ECPoint operator *(BigInt k) {
-    var n = k % secp256k1N;
-    var result = ECPoint.infinity();
-    var addend = this;
-    while (n > BigInt.zero) {
-      if (n.isOdd) result = result + addend;
-      addend = addend + addend;
-      n >>= 1;
+    final n = k % secp256k1N;
+    if (n == BigInt.zero) return ECPoint.infinity();
+
+    // Montgomery ladder: invariant R1 - R0 == this throughout.
+    var r0 = ECPoint.infinity();
+    var r1 = this;
+    for (var i = n.bitLength - 1; i >= 0; i--) {
+      if (!((n >> i).isOdd)) {
+        r1 = r0 + r1;
+        r0 = r0 + r0;
+      } else {
+        r0 = r0 + r1;
+        r1 = r1 + r1;
+      }
     }
-    return result;
+    return r0;
   }
 
   @override

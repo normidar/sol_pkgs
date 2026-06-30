@@ -298,14 +298,13 @@ void _printDeploySuccess({
   stdout.writeln('  Tx hash  : $txHash');
   stdout.writeln('  Gas used : $gasUsed');
 
-  final fns =
-      abi
-          .where(
-            (e) =>
-                e['type'] == 'function' &&
-                _isPublic(e['stateMutability'] as String? ?? ''),
-          )
-          .toList();
+  final fns = abi
+      .where(
+        (e) =>
+            e['type'] == 'function' &&
+            _isPublic(e['stateMutability'] as String? ?? ''),
+      )
+      .toList();
 
   if (fns.isNotEmpty) {
     stdout.writeln('\n  Public functions:');
@@ -314,15 +313,12 @@ void _printDeploySuccess({
     }
   }
 
-  final events =
-      abi.where((e) => e['type'] == 'event').toList();
+  final events = abi.where((e) => e['type'] == 'event').toList();
   if (events.isNotEmpty) {
     stdout.writeln('\n  Events:');
     for (final ev in events) {
       final name = ev['name'] as String;
-      final inputs = _formatParams(
-        ev['inputs'] as List<dynamic>? ?? [],
-      );
+      final inputs = _formatParams(ev['inputs'] as List<dynamic>? ?? []);
       stdout.writeln('    $name($inputs)');
     }
   }
@@ -338,10 +334,9 @@ String _formatFn(Map<String, dynamic> fn) {
   final outputs = fn['outputs'] as List<dynamic>? ?? [];
   final mutability = fn['stateMutability'] as String? ?? '';
 
-  final outputStr =
-      outputs.isEmpty
-          ? ''
-          : ' → ${_formatParams(outputs, namesOptional: true)}';
+  final outputStr = outputs.isEmpty
+      ? ''
+      : ' → ${_formatParams(outputs, namesOptional: true)}';
 
   final tag = switch (mutability) {
     'pure' => ' [pure]',
@@ -353,17 +348,16 @@ String _formatFn(Map<String, dynamic> fn) {
   return '$name($inputs)$outputStr$tag';
 }
 
-String _formatParams(
-  List<dynamic> params, {
-  bool namesOptional = false,
-}) {
-  return params.map((p) {
-    final m = p as Map<String, dynamic>;
-    final type = m['type'] as String? ?? '';
-    final name = m['name'] as String? ?? '';
-    if (namesOptional || name.isEmpty) return type;
-    return '$type $name';
-  }).join(', ');
+String _formatParams(List<dynamic> params, {bool namesOptional = false}) {
+  return params
+      .map((p) {
+        final m = p as Map<String, dynamic>;
+        final type = m['type'] as String? ?? '';
+        final name = m['name'] as String? ?? '';
+        if (namesOptional || name.isEmpty) return type;
+        return '$type $name';
+      })
+      .join(', ');
 }
 
 /// Appends a deployment record to [deployments.json] in the current directory.
@@ -399,9 +393,7 @@ String _saveDeployment({
     'abi': abi,
   });
 
-  file.writeAsStringSync(
-    const JsonEncoder.withIndent('  ').convert(records),
-  );
+  file.writeAsStringSync(const JsonEncoder.withIndent('  ').convert(records));
 
   return file.absolute.path;
 }
@@ -418,12 +410,10 @@ int _runInfo(String contractName) {
     return 1;
   }
 
-  final records =
-      (jsonDecode(depFile.readAsStringSync()) as List)
-          .cast<Map<String, dynamic>>();
+  final records = (jsonDecode(depFile.readAsStringSync()) as List)
+      .cast<Map<String, dynamic>>();
 
-  final matches =
-      records.where((r) => r['name'] == contractName).toList();
+  final matches = records.where((r) => r['name'] == contractName).toList();
 
   if (matches.isEmpty) {
     final names = records.map((r) => r['name']).toSet().join(', ');
@@ -465,9 +455,7 @@ int _runInfo(String contractName) {
       stdout.writeln('\n  Events:');
       for (final ev in events) {
         final name = ev['name'] as String;
-        final inputs = _formatParams(
-          ev['inputs'] as List<dynamic>? ?? [],
-        );
+        final inputs = _formatParams(ev['inputs'] as List<dynamic>? ?? []);
         stdout.writeln('    $name($inputs)');
       }
     }
@@ -510,8 +498,8 @@ Future<int> _runCall(
     );
     return 1;
   }
-  final records =
-      (jsonDecode(depFile.readAsStringSync()) as List).cast<Map<String, dynamic>>();
+  final records = (jsonDecode(depFile.readAsStringSync()) as List)
+      .cast<Map<String, dynamic>>();
   final record = records.lastWhere(
     (r) => r['name'] == contractName,
     orElse: () => {},
@@ -525,8 +513,7 @@ Future<int> _runCall(
   }
 
   final address = EthAddress.fromHex(record['address'] as String);
-  final abi =
-      (record['abi'] as List).cast<Map<String, dynamic>>();
+  final abi = (record['abi'] as List).cast<Map<String, dynamic>>();
 
   // Find matching function in ABI
   final fnDef = abi.firstWhere(
@@ -545,10 +532,9 @@ Future<int> _runCall(
     return 1;
   }
 
-  final inputs =
-      (fnDef['inputs'] as List? ?? []).cast<Map<String, dynamic>>();
-  final outputs =
-      (fnDef['outputs'] as List? ?? []).cast<Map<String, dynamic>>();
+  final inputs = (fnDef['inputs'] as List? ?? []).cast<Map<String, dynamic>>();
+  final outputs = (fnDef['outputs'] as List? ?? [])
+      .cast<Map<String, dynamic>>();
   final mutability = fnDef['stateMutability'] as String? ?? 'nonpayable';
 
   // Parse and encode arguments
@@ -576,8 +562,7 @@ Future<int> _runCall(
   }
 
   // Build calldata = 4-byte selector + ABI-encoded args
-  final signature =
-      '$fnName(${inputs.map((p) => p['type']).join(',')})';
+  final signature = '$fnName(${inputs.map((p) => p['type']).join(',')})';
   final selector = selectorBytes(signature);
   final encoded = AbiEncoder().encode(encodedArgs);
   final calldata = Uint8List(selector.length + encoded.length)
@@ -589,7 +574,9 @@ Future<int> _runCall(
     if (mutability == 'view' || mutability == 'pure') {
       // Read-only: eth_call
       final result = await client.ethCall(to: address, data: calldata);
-      final outputTypes = outputs.map((o) => _parseSolType(o['type'] as String)).toList();
+      final outputTypes = outputs
+          .map((o) => _parseSolType(o['type'] as String))
+          .toList();
       _printCallResult(
         fnName: fnName,
         signature: signature,
@@ -686,7 +673,8 @@ String _formatValue(Object? value, SolType type) {
   if (value is Uint8List) {
     return '0x${value.map((b) => b.toRadixString(16).padLeft(2, '0')).join()}';
   }
-  if (value is List) return '[${value.map((v) => _formatValue(v, type)).join(', ')}]';
+  if (value is List)
+    return '[${value.map((v) => _formatValue(v, type)).join(', ')}]';
   return '$value';
 }
 
@@ -730,7 +718,8 @@ SolType _parseSolType(String type) {
     final size = sizeStr.isEmpty ? null : int.tryParse(sizeStr);
     return ArrayType(elementType, length: size);
   }
-  if (type == 'address' || type == 'address payable') return const AddressType();
+  if (type == 'address' || type == 'address payable')
+    return const AddressType();
   if (type == 'bool') return const BoolType();
   if (type == 'string') return const StringType();
   if (type == 'bytes') return const BytesType();

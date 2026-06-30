@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:sol_support/sol_support.dart';
@@ -50,11 +49,19 @@ void main() {
       expect(recovered, isNot(key.address));
     });
 
-    test('signature nonce is randomised across calls (no nonce reuse)', () {
+    test('RFC 6979: same key+message always produces the same signature', () {
       final privateKey = BigInt.from(424242);
       final hash = keccak256OfString('same message every time');
-      final sig1 = signEcdsa(privateKey, hash, Random.secure());
-      final sig2 = signEcdsa(privateKey, hash, Random.secure());
+      final sig1 = signEcdsa(privateKey, hash);
+      final sig2 = signEcdsa(privateKey, hash);
+      expect(sig1.r, sig2.r, reason: 'RFC 6979 nonce must be deterministic');
+      expect(sig1.s, sig2.s);
+    });
+
+    test('RFC 6979: different messages produce different nonces', () {
+      final privateKey = BigInt.from(424242);
+      final sig1 = signEcdsa(privateKey, keccak256OfString('message one'));
+      final sig2 = signEcdsa(privateKey, keccak256OfString('message two'));
       expect(sig1.r, isNot(sig2.r));
     });
 
