@@ -66,6 +66,13 @@ Future<int> runCompiler(List<String> args) async {
           'Reads address and ABI from deployments.json in the current directory.\n'
           'view/pure functions use eth_call; others sign and send a transaction.',
     )
+    ..addOption(
+      'info',
+      help:
+          'Show stored deployment info for a contract by name.\n'
+          'Reads from deployments.json in the current directory.\n'
+          'Example: --info Counter',
+    )
     ..addFlag('version', negatable: false, help: 'Print version and exit.')
     ..addFlag('help', abbr: 'h', negatable: false, help: 'Show usage.');
 
@@ -87,6 +94,12 @@ Future<int> runCompiler(List<String> args) async {
   if (parsed['version'] as bool) {
     stdout.writeln('solc-dart 0.1.0');
     return 0;
+  }
+
+  // ── info mode ─────────────────────────────────────────────────────────────
+  final infoName = parsed['info'] as String?;
+  if (infoName != null) {
+    return _runInfo(infoName);
   }
 
   // ── call mode ─────────────────────────────────────────────────────────────
@@ -391,6 +404,78 @@ String _saveDeployment({
   );
 
   return file.absolute.path;
+}
+
+// ── info command ─────────────────────────────────────────────────────────────
+
+int _runInfo(String contractName) {
+  final depFile = File('deployments.json');
+  if (!depFile.existsSync()) {
+    stderr.writeln(
+      'Error: deployments.json not found in current directory.\n'
+      'Deploy a contract first with: solc --deploy <file.sol>',
+    );
+    return 1;
+  }
+
+  final records =
+      (jsonDecode(depFile.readAsStringSync()) as List)
+          .cast<Map<String, dynamic>>();
+
+  final matches =
+      records.where((r) => r['name'] == contractName).toList();
+
+  if (matches.isEmpty) {
+    final names = records.map((r) => r['name']).toSet().join(', ');
+    stderr.writeln(
+      'Error: contract "$contractName" not found in deployments.json.\n'
+      'Available: $names',
+    );
+    return 1;
+  }
+
+  final sep = '─' * 60;
+
+  for (var i = 0; i < matches.length; i++) {
+    final r = matches[i];
+    final abi = (r['abi'] as List? ?? []).cast<Map<String, dynamic>>();
+
+    stdout.writeln('\n$sep');
+    if (matches.length > 1) {
+      stdout.writeln('  Deployment ${i + 1} of ${matches.length}');
+    }
+    stdout.writeln('  Contract : ${r['name']}');
+    stdout.writeln(sep);
+    stdout.writeln('  Address  : ${r['address']}');
+    stdout.writeln('  Chain ID : ${r['chainId']}');
+    stdout.writeln('  Tx hash  : ${r['txHash']}');
+    stdout.writeln('  RPC URL  : ${r['rpcUrl']}');
+    stdout.writeln('  Deployed : ${r['deployedAt']}');
+
+    final fns = abi.where((e) => e['type'] == 'function').toList();
+    if (fns.isNotEmpty) {
+      stdout.writeln('\n  Public functions:');
+      for (final fn in fns) {
+        stdout.writeln('    ${_formatFn(fn)}');
+      }
+    }
+
+    final events = abi.where((e) => e['type'] == 'event').toList();
+    if (events.isNotEmpty) {
+      stdout.writeln('\n  Events:');
+      for (final ev in events) {
+        final name = ev['name'] as String;
+        final inputs = _formatParams(
+          ev['inputs'] as List<dynamic>? ?? [],
+        );
+        stdout.writeln('    $name($inputs)');
+      }
+    }
+
+    stdout.writeln(sep);
+  }
+
+  return 0;
 }
 
 // ── call command ─────────────────────────────────────────────────────────────
