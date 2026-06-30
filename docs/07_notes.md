@@ -23,14 +23,14 @@
 
 **残余限制**：Dart VM 的 `BigInt` 运算在机器字级别不保证恒定时间（运行时大数库内部仍可能存在缓存/分支时序差异）。上述措施显著提高了安全门槛，但纯 Dart 实现无法替代经过硬件级加固的库（如 libsecp256k1）。对于极高安全要求的主网生产环境，建议通过 `dart:ffi` 绑定 libsecp256k1。
 
-## 已知限制
+## 功能支持情况
 
 | 功能 | 状态 |
 |------|------|
-| 带构造函数参数的合约部署 | 需自行 ABI 编码后拼接到 bytecode 末尾 |
-| `eth_getLogs` / 事件日志解码 | 未实现 |
-| `CREATE2` 地址计算 | 未实现 |
-| WebSocket 订阅（`eth_subscribe`） | 未实现 |
+| 带构造函数参数的合约部署 | 已支持：向 `ContractDeployer.deploy()` 传入 `constructorArgs`（用 `sol_abi` 的 `AbiEncoder` 编码后传入），会自动拼接到 bytecode 末尾 |
+| `eth_getLogs` / 事件日志解码 | 已支持：`EthereumClient.getLogs()` 获取原始日志，`decodeEventLog()` 配合 `EventParam` 将 topics/data 解码为类型化 Dart 值 |
+| `CREATE2` 地址计算 | 已支持：`computeCreate2Address(sender, salt, initCode)` |
+| WebSocket 订阅（`eth_subscribe`） | 已支持：`WebSocketJsonRpcClient.subscribe()` / `unsubscribe()`，以及 `EthereumClient.subscribeNewHeads()` / `subscribeLogs()` |
 
 ## deployments.json 的作用范围
 

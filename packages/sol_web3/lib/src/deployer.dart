@@ -74,8 +74,12 @@ class ContractDeployer {
 
   final EthereumClient client;
 
-  /// Deploys [bytecode] (contract creation code, already including
-  /// constructor-argument ABI encoding if any) signed by [credentials].
+  /// Deploys [bytecode] (contract creation code) signed by [credentials].
+  ///
+  /// Pass [constructorArgs] as ABI-encoded constructor arguments (e.g. from
+  /// `AbiEncoder` in `sol_abi`) to have them appended to [bytecode]
+  /// automatically. Omit or pass `null` for contracts with no constructor
+  /// parameters.
   ///
   /// [value] is the wei sent with the creation transaction (default zero).
   /// [gasLimit], [chainId] are fetched/estimated automatically when not
@@ -84,6 +88,7 @@ class ContractDeployer {
   Future<DeploymentResult> deploy({
     required EthPrivateKey credentials,
     required Uint8List bytecode,
+    Uint8List? constructorArgs,
     BigInt? value,
     BigInt? gasLimit,
     BigInt? chainId,
@@ -91,12 +96,15 @@ class ContractDeployer {
     Duration pollInterval = const Duration(seconds: 1),
     Duration timeout = const Duration(minutes: 2),
   }) async {
+    final initCode = constructorArgs != null && constructorArgs.isNotEmpty
+        ? Uint8List.fromList([...bytecode, ...constructorArgs])
+        : bytecode;
     final sender = credentials.address;
     final resolvedChainId = chainId ?? await client.chainId();
     final nonce = await client.getTransactionCount(sender);
     final resolvedGasLimit =
         gasLimit ??
-        (await client.estimateGas(from: sender, data: bytecode) *
+        (await client.estimateGas(from: sender, data: initCode) *
                 BigInt.from(12)) ~/
             BigInt.from(10);
 
@@ -115,7 +123,7 @@ class ContractDeployer {
       chainId: resolvedChainId,
       nonce: nonce,
       gasLimit: resolvedGasLimit,
-      data: bytecode,
+      data: initCode,
       value: value,
       type: type,
       gasPrice: gasPrice,

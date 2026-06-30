@@ -47,6 +47,9 @@ class _FakeEthNode {
   EthAddress? recoveredSender;
   BigInt? observedNonce;
 
+  /// The `data` field (init-code) from the last sent raw transaction.
+  Uint8List? observedData;
+
   Uri get uri => Uri.parse('http://127.0.0.1:${server.port}');
 
   Future<void> _handle(HttpRequest request) async {
@@ -98,6 +101,7 @@ class _FakeEthNode {
     }
 
     final nonce = bytesToBigInt((items[1] as RlpBytes).data);
+    observedData = (items[7] as RlpBytes).data;
     final v = bytesToBigInt((items[9] as RlpBytes).data);
     final r = bytesToBigInt((items[10] as RlpBytes).data);
     final s = bytesToBigInt((items[11] as RlpBytes).data);
@@ -174,6 +178,40 @@ void main() {
           computeCreateAddress(key.address, BigInt.zero),
         );
         expect(result.transactionHash, startsWith('0x'));
+      } finally {
+        client.close();
+        await node.close();
+      }
+    },
+  );
+
+  test(
+    'constructorArgs are appended to bytecode in the transaction data',
+    () async {
+      final bytecode = Uint8List.fromList([0x60, 0x80, 0x60, 0x40]);
+      // ABI encoding of uint256(42): 32 zero bytes with 0x2a at the end.
+      final constructorArgs = Uint8List(32)..[31] = 0x2a;
+
+      final node = await _FakeEthNode.start();
+      final key = EthPrivateKey.createRandom();
+      final client = EthereumClient(node.uri);
+      final deployer = ContractDeployer(client);
+
+      try {
+        await deployer.deploy(
+          credentials: key,
+          bytecode: bytecode,
+          constructorArgs: constructorArgs,
+          pollInterval: const Duration(milliseconds: 10),
+          timeout: const Duration(seconds: 5),
+        );
+
+        final observed = node.observedData!;
+        // The first bytes must be the original bytecode.
+        expect(observed.sublist(0, bytecode.length), bytecode);
+        // The trailing bytes must be the constructor args.
+        expect(observed.sublist(bytecode.length), constructorArgs);
+        expect(observed.length, bytecode.length + constructorArgs.length);
       } finally {
         client.close();
         await node.close();

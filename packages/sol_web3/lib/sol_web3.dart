@@ -13,6 +13,7 @@ export 'src/crypto/secp256k1.dart';
 export 'src/deployer.dart';
 export 'src/eth_address.dart';
 export 'src/eth_client.dart';
+export 'src/event_log_decoder.dart';
 export 'src/json_rpc_client.dart';
 export 'src/json_rpc_transport.dart';
 export 'src/rlp.dart';
